@@ -1,0 +1,223 @@
+Things that a text adventure world needs:
+
+TABLES (and their columns)
+
+    users: username, password, salt, obj, email
+    objects: id, name, type, flags, desc, link, parent, owner
+    deleted: id
+    inventory: parent, child
+    locks: obj, lock
+    acl: obj, player, flags
+    messages: obj, succ, fail, osucc, ofail
+    objdata: obj, props, script
+
+INITIAL OBJECTS
+    When the database is created, it is populated with two initial objects, as follows:
+    - The Universe (Room #0)
+        This is the root of the database; without it, there would be no place for any other objects to exist in.
+        - The parent of Room #0 is itself.
+        - Room #0 is owned by God (#1).
+    - God (Player #1)
+        This is the superuser account, allowing the server admin to log in and begin creating more objects.
+        - God's parent is initially #0, (there is nowhere else for it to be).
+        - Like all players, #1 is owned by itself.
+    Because of the importance of these two objects, the system will not allow them to be deleted, and certain flags will be enforced.
+    For example, player #1 will not be able to remove the Admin flag, and if it is found to be missing at server startup, it will be re-added.
+
+TABLE DETAILS
+
+users table:
+    Stores information about user accounts.
+    This is basically just a username and password pair that then links to the id of the player's object.
+
+objects table:
+    Stores basic data about an object. This is the most important table in the database.
+
+    - id: The database ID of the object. This is a unique, non-null unsigned integer.
+    - name: A name for this object (String).
+        - Names do not need to be unique, with one exception: no object may be given the same name as a Player, to prevent impersonation.
+    - type: A type value (Player, Room, Action, Item, Script). This is set at creation and cannot be modified.
+    - flags: A set of boolean flags that modify the object (long integer).
+        - Flags have varying meaning depending on object type. Flags are listed elsewhere.
+    - desc: A description (String).
+        - Describes the object, and is seen when a player looks at the object.
+    - link: The ID of an object that this object links to. May be null.
+        - Setting the link of a Player, Item or Script to a valid container sets the object's home. These cannot be unlinked.
+        - Setting the link of an Action determines either a script to execute or a room to transport the player to.
+        - Setting the link of a Room currently has no effect.
+    - parent: The ID of the object that contains this object, i.e. the location of the object. Cannot be null.
+        - Cannot be explicitly set, but is set implicitly by moving the object.
+    - owner: An owner (ID), must be a Player's ID. Players always own themselves.
+
+deleted table:
+    Contains a list of IDs whose objects have been marked as deleted.
+    When a user requests deletion of an object, it is flagged as deleted, and its ID is added to this table. This gives users a chance to undo.
+    When a new object is created, the first ID in this table (if any) is removed and claimed as the ID of the new object.
+    The details of the deleted object with that ID are then overwritten with those of the new object, and the old object is lost forever.
+    This system allows IDs to be reused and doesn't leave "holes" in the database.
+
+inventory table:
+    Stores which objects contain which other objects. This is a many-to-one relationship table.
+    This is basically just a fast lookup table to quickly get a list of objects contained by another.
+    The "parent" field of the objects table is authorative, and if needed, the inventory table can be entirely rebuilt from the objects table.
+    
+    Every object must have a parent, and cannot have multiple parents, but can contain multiple child objects.
+    All objects must be able to trace their "ancestry" back to ID 0, forming a tree structure rooted at Room #0, whose parent is itself.
+    The ancestry constraint sensibly prevents an object from ever containing itself, its parent, or one of its ancestors.
+
+    Certain types of object are limited in what they can contain:
+    - Rooms: May contain any type, including other Rooms.
+    - Players: May contain Items, Scripts, Actions and even other Players, but not Rooms.
+    - Items: May contain other Items, Scripts, and Actions, but not Rooms or Players.
+    - Scripts: Identical to Items.
+    - Actions: Cannot contain anything.
+
+    Fields:
+    - parent: The ID of the containing object.
+    - child: The ID of an object contained by parent.
+
+
+messages table: Contains the values for the various messages that an object may have.
+    This will generally only contain rows for Actions and Items.
+    All values are varchars, and all may be null, in which case no message is displayed.
+    
+    Fields:
+    - succ: A success message.
+        - For Actions, a player will see this message when they successfully invoke the Action.
+        - For Items, a player will see this message when they pick up the item.
+    - fail: A failure message.
+        - For Actions, a player will see this message when they fail the Action's lock, or the script invoked by the Action returns failure.
+        - For Items, a player will see this message when they fail to pick up an item.
+    - osucc: An external success message, which others nearby will see.
+        - The message will be automatically prepended by the player's name.
+        - For Actions, players in the same room will see this message when a player successfully uses the Action.
+        - For Actions linked to a room (Exits), replaces the standard "X has left" message when a player uses the exit.
+        - For Items, players in the same room will see this message when a player successfully picks up the item.
+    - ofail: An external failure message, which others nearby will see.
+        - The message will be automatically prepended by the player's name.
+        - For actions, this message is seen by others in the same room when a player fails the action's lock, or a linked script fails.
+        - For Items, this message is seen seen by other players in the room when a player fails to pick up the item.
+    - drop: Similar to success value.
+        - The message will be automatically prepended by the player's name.
+        - For Exits, this message is broadcast to all players in the destination room, replacing the standard "X has arrived" message.
+        - For Items, this message is seen by other players in the room where a player drops this item.
+    - There is no "drop fail" message.
+    
+locks table:
+    This is a many-to-many relationship table, holding the individual values from an object's basic lock list.
+    
+acl table:
+    This is a many-to-many relationship table, holding the individual values from an object's access control list.
+    Each entry has associated flags that specify what level of access that player has to this object.
+
+    - acl: An access list, basically a list of player IDs with permission to modify this object. Access lists are inherited from the parent.
+    - props: Properties, which is an arbitrary dictionary of string key/value pairs, whose values may themselves be a dictionary.
+
+FLAGS
+    G: God
+        - Script: allows it to use all functions without restriction. Warning! This basically lets a script run "as root".
+        - Player: makes that Player a God (Superadmin). This lets them stop the server, so be careful!
+    A: admin
+        - Script: allows it to use admin functions. Warning! This lets the script do powerful things.
+        - Player: makes that Player an admin.
+    M: moderator
+    H: helper
+    
+    e: ENVIRONMENT
+        - Room: Marks this room as an Environment room. It becomes the default parent for any new Rooms created by a player standing in it or any non-Environment child rooms.
+    p: PUBLIC
+        - Room: Any user may now use this Room as a parent room. By default, only the owner of a room can use it as a parent.
+        - Action: If this Action is in a user's inventory, then anyone in the same room can use the Action (safe?).
+            Note that actions made Public in this way will not override existing ones; they are used only if no other exists.
+            These type of Actions can only run scripts, they cannot transport the invoking player anywhere.
+    l: LINKABLE (public)
+        - Room: allows any player to set their home here, overriding the lock.
+        - Script: allows actions to be publically linked to the script, overriding the lock.
+    i: INVISIBLE
+        - Item, Script, Action or Player: hides the item from the respective list (item's owner can still see it).
+        - Room: makes that room "dark", meaning that a Player cannot see any other Players or Items in the room (but can still hear them, unless Silent is also set).
+    s: SILENT
+        - Item, Player: will cause messages to be suppressed when it enters or leaves a room, allowing movement without being noticed.
+        - On a Room, will cause silence within the room by preventing players from speaking and performing actions. 
+    x: XLOCK
+        When checking the lock list, ALL of the locks must be passed instead of just one.
+    u: LOCKED
+        The result of checking the lock list is inverted, so that players will pass the lock UNLESS they match it.
+    t: TRANSPARENT
+        - Room: causes messages from the parent room to be shown in this room, while messages in this room are broadcast into the parent room.
+    w: WARPABLE
+        - Room: Players and objects may warp (teleport) into this room.
+        - Item: Players and objects may warp to the same room as this item, only if the room is also warpable (?)
+    
+LOCKS
+    Locks are checked for different reasons depending on object type:
+        - Action: The lock list is checked when the user tries to trigger the action.
+        - Script: The lock list is checked when a user tries to link an action to this script.
+        - Room: The lock list is checked when a user tries to drop an item in this room.
+        - Player: The lock list is checked when another player tries to pick up and carry this player.
+        - Item: The lock list is checked when a player tries to pick up this item.
+    
+    The lock list is made up of a list of IDs. When the lock is checked, each ID in the list is first resolved to a boolean value as follows:
+        - Player ID: true only if it matches the ID of the player who triggered the lock check.
+        - Item ID: true if the inventory of the triggering player contains an object with this ID.
+        - Script ID: the script is executed, and gives true if the script returns success, or false on failure.
+        - Room and Action IDs are invalid, and will always resolve to false.
+    
+    The resulting list of boolean values is then treated as follows:
+        - An empty list always results in false.
+        - If the list is not empty, the result is true if any one value is true (Logical OR).
+        - If the XLOCK flag is set, then all values must be true in order to give a true result (Logical AND).
+        - If LOCKED is set, then the triggering player will fail the lock if the result is false.
+        - Otherwise, the result is inverted, and the triggering player will fail the lock if the result is true.
+
+    The default for a new object is an empty list and no LOCKED flag, which means all lock checks will pass.
+    Setting the LOCKED flag will cause everyone to fail the lock. Subsequently adding a player's ID to the lock list will allow only them to use the object. This is fairly intuitive.
+    However adding a player's ID to the list WITHOUT setting the LOCKED flag will allow everyone EXCEPT the user in the list to use the object, that is, it locks that player out.
+     
+    Note: The object's owner does not automatically pass if the object is locked - they must be explicitly allowed in the list.
+
+NEW ITEMS
+    Newly-created items are treated as follows:
+
+    New Players:
+        Obviously only created upon a new user registering. The Player object will be created in the server's configured room for newbies.
+        By default, players are locked to themselves.
+    New Items, Scripts and Actions:
+        Will be created in the inventory of the creating player.
+    New Rooms:
+        The room containing the player is checked for the Environment (+e) flag. If it lacks this flag, then the room's parent is checked, and so on, until a room with the Environment flag is found (room #0 always has this flag). The new room will then be created as a parent of this room.
+
+SCRIPTS
+    - A script is executed by making it the destination of an action. The script is run when the action is triggered.
+    - Like Items, the Destination field of a script sets its home.
+    - Scripts may not be directly executed - they must be run by an Action.
+    - Scripts can contain Actions, which if linked to the Script, makes them usable as a standalone item.
+    - By default an Action with a Script destination will succeed. However, Scripts may explicitly return failure, which causes the Action that called it to fail. The Action will also fail if a script contains errors.
+    - The success value holds the executable text of the script itself.
+    - The failure value and external values are unused at the current time.
+    - A script may access its own properties as a kind of persistant global storage. Generally though, such storage would be done on the Action that calls it.
+    - The lock value controls who may link an Action to the script. Anyone may link to an unlocked script.
+
+ACTIONS
+    - Actions can be invoked by a player and usually have some affect on the object referred to by the action's destination field.
+    - A Room destination will transport a player to that room, a Script destination will execute that script.
+    - An action cannot be linked to an Object, Player or Item.
+    - An action 
+    - The action's Lock field determines who can successfully use/run the action.
+    - Actions cannot contain anything, they do not have an inventory.
+    - Visibility rules:
+        - When contained by a Room, or an Item/Script in a Room the action is usable by any Player in that room.
+        - When contained by a Player, or an Item/Script carried by a Player, only that Player can use the action.
+    
+
+ROOMS
+    
+
+A note on contents:
+
+Players INTERACT. Rooms CONTAIN. Actions TRANSPORT. Items EXIST. Scripts MODIFY.
+
+
+
+
+Players can be connected to, can perform actions, and can move between rooms.
