@@ -1,179 +1,269 @@
+from zope.interface import implements
+from twisted.conch.interfaces import IConchUser
+
 from twisted.internet import protocol
+from twisted.cred import portal
+from twisted.conch import avatar, recvline
+from twisted.conch.insults import insults
+from twisted.conch.ssh import factory as conch_factory, userauth, connection, keys, session
+from twisted.conch.ssh.address import SSHTransportAddress
+
 from Util import log, LogLevel, enum
+
+import string
 
 import World
 import Things
+from User import SSHUser, IUserProtocol, State
 
-State = enum('New', 'LoggedIn')
+class BareUserProtocol(protocol.Protocol):
+    implements(IUserProtocol)
 
-commands = {}
-class commandHandler:
-    def __init__(self, *aliases):
-        self.cmds = aliases
-    def __call__(self, f):
-        for cmd in self.cmds:
-            commands[cmd] = f
+    # TODO: Move BasicUserSession code in here
 
-
-class UserSession(protocol.Protocol):
-
-    def __init__(self):
-        self.world = World.getWorld()
-        self.player = None
-        self.my_state = State.New
+    def __init__(self, user=None):
+        self.user = user
         self.buf = ''
 
     def connectionMade(self):
-        log(LogLevel.Info, "Incoming connection from {0}".format(self.transport.getHost()))
-        self.host = self.transport.getHost().host
-
-    def connectionLost(self, data):
-        log(LogLevel.Info, "{0}#{1} [{2}] lost connection: {3}".format(self.player.name(), self.player.id(), self.host, data.getErrorMessage()))
+        h = self.transport.getHost()
+        log(LogLevel.Info, "Incoming connection from {0}".format(h))
 
     def dataReceived(self, data):
         "When data is received, process it according to state."
-        if '\n' in data:
-            # Strip CR
-            data = data.translate(None, '\r')
+        if self.sshmode:
+            self.transport.write(data)
+            if data == '\r': self.transport.write('\n')
+        data = data.translate('\r', '\n')
             # Split to completed lines
-            lines = data.split('\n')
+            lines = filter(len, data.split('\n')) # eliminate empty lines
             lines[0] = self.buf+lines[0]
             self.buf = lines[-1]
             for line in lines[:-1]: self.process_line(line.strip())
         else:
-            log(LogLevel.Debug, "Received data without terminating newline, buffering")
+            log(LogLevel.Debug, "Received data without terminating newline, buffering: {0}".format(repr(data)))
             self.buf += data
 
-    def send_message(self, msg):
-        self.transport.write(msg.encode('utf8')+'\r\n')
+class BasicUserSession(protocol.Protocol):
 
-    @commandHandler('@debug')
-    def cmd_debug(self, params):
-        if params:
-            if params[0] == 'cache':
-                self.world.purge_cache(10)
+    def __init__(self, avatar=None):
+        self.player = None
+        self.buf = ''
+        self.avatar = avatar
 
-    @commandHandler('@quit', 'QUIT')
-    def cmd_QUIT(self, params):
-        self.send_message("Goodbye!")
-        self.transport.loseConnection()
-        return
+    def connectionMade(self):
+        h = self.transport.getHost()
+        if type(h) is SSHTransportAddress:
+            self.sshmode = True
+            h = h.address
+        log(LogLevel.Info, "Incoming connection from {0}".format(h))
+        self.host = h.host
+        if self.avatar:
+            self.player = self.world.connect(self.avatar.username)
+            self.complete_login()
 
-    @commandHandler('@who', 'WHO')
-    def cmd_WHO(self, params):
-        # TODO: Track who's online
-        self.send_message("Nobody else is connected.")
-        return
 
-    @commandHandler('connect')
-    def cmd_connect(self, params):
-        log(LogLevel.Debug, "Received connect command from {0}".format(self.transport.getHost()))
-        if self.my_state > State.New:
-            #Already connected
-            self.send_message("You are already connected.")
-            return
-        user = params[0]
-        passwd = params[1]
-        # Try and auth to an account
-        self.player = self.world.connect(user, passwd)
-        if self.player:
-            self.my_state = State.LoggedIn
-            log(LogLevel.Notice, "{0}#{1} connected from {2}".format(self.player.name(), self.player.id(), self.transport.getHost().host))
-            # Make them look around and check their inventory
-            location = self.player.parent() # Get room that the player is in
-            self.send_message("Welcome, {0}! You are currently in: {1}\r\n{2}".format(self.player.name(), location.name(), location.desc(self.player)))
-            self.send_message("You are carrying: {0}".format(', '.join(map(lambda x: x.name(), self.player.contents()))))
-            
+    def connectionLost(self, data):
+        if self.my_state < State.LoggedIn:
+            pass
+            log(LogLevel.Info, "{0} lost connection: {1}".format(self.host, data.getErrorMessage()))
         else:
-            self.send_message("Your login failed. Try again.")
-        return
-
-    @commandHandler('@i', '@inv', '@inventory')
-    def cmd_inv(self, params):
-        if self.my_state < State.LoggedIn:
-            self.send_message("You're not connected to a character.")
-            return
-        self.send_message("You are carrying: {0}".format(', '.join(map(lambda x: x.name(), self.player.contents()))))
-
-    @commandHandler('@create', 'create')
-    def cmd_create(self, params):
-        if self.my_state > State.New:
-            self.send_message("You are already connected.")
-            return
-        _, user, passwd = line.split()
-        # TODO: more code here
-        return
+            try: 
+                log(LogLevel.Info, "{0}#{1} [{2}] lost connection: {3}".format(self.player.name, self.player.id, self.host, data.getErrorMessage()))
+            except:
+                log(LogLevel.Info, "<UNKNOWN> {0} lost connection: {1}".format(self.host, data.getErrorMessage()))
 
 
-    def process_line(self, line):
-        "Process input"
-
-        if line == '': return
-        words = line.split()
-        cmd = words[0]
-        params = words[1:] if len(words) > 1 else None
-
-        # Command dispatch map. Most commands should be accessed this way.
-        if words[0] in commands.keys():
-            try:
-                log(LogLevel.Debug, "{0} running command: {1}{2}".format(
-                    "{0}#{1}".format(self.player.name(), self.player.id()) if self.player else self.transport.getHost().host,
-                    words[0], "({0})".format(', '.join(params) if (words[0] not in ('connect', '@connect')) else '[redacted]')
-                    if params else ''))
-            except TypeError, e:
-                log(LogLevel.Trace, "words: {0}, params: {1}".format(repr(words), repr(params)))
-                log(LogLevel.Trace, "Exception: {0}".format(repr(e)))
-            commands[words[0]](self, params)
-            return
-
-        # Everything following this point can only be run on a logged in character.
-        if self.my_state < State.LoggedIn:
-            self.send_message("You're not connected to a character.")
-            return
-        # Check for common prefixes:
-
-        # say command
-        if line[0] == '"':
-            # Echo back to the player
-            self.send_message('You say, "{0}"'.format(line[1:]))
-            # Send message to others who can hear it
-            # TODO: Insert code here
-            return
-        # pose command
-        if line[0] == ':':
-            # Echo back to the player
-            self.send_message('{0} {1}'.format(self.player.name(), line[1:]))
-            # Send message to others who can see it
-            # TODO: Insert code here
-            return
-        if line[0] == '@':
-            self.at_command(words[0], params)
-            return
 
 
-        # TODO: try and activate the named action/exit
 
-        # Other basic commands
-        if line.lower().startswith('look'):
-            params = line.split(None, 1)
-            if len(params) > 1:
-                self.send_message(self.player.look(params[1]))
-            else: 
-                self.send_message(self.player.look())
-        return
+class SSHRealm:
+    """
+    This simple realm generates User instances.
+    """
+    implements(portal.IRealm)
 
-        # If control fell through this far, then we have an unknown command/action
-        self.send_message("I don't know what that means.")
-        return
+    def requestAvatar(self, avatarId, mind, *interfaces):
+        if IConchUser in interfaces:
+            return interfaces[0], SSHUser(avatarId), lambda: None
+        else:
+            log(LogLevel.Error, "SSHRealm: No supported interfaces")
+            raise NotImplementedError("No supported interfaces found.")
 
-    def at_command(self, command, params):
-
-        # Placeholder
-        self.send_message("You ran command: @{0}\r\nWith params: {1}".format(command, params))
-
-
-        if command=="dig":
-            room = Things.Room()
+import os, sys
+if not os.path.exists('host_rsa'):
+    if not sys.platform.startswith('linux'):
+        log(LogLevel.Error, "SSH host keys are missing and I don't know how to generate them on this platform")
+        log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
+        raise SystemExit(1)
+    log(LogLevel.Warn, 'SSH host keys are missing, invoking ssh-keygen to generate them')
+    ret = os.spawnl(os.P_WAIT, '/usr/bin/env', 'ssh-keygen', 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
+    if ret != 0:
+        log(LogLevel.Error, 'Failed generating SSH host keys. Is ssh-keygen installed on this system?')
+        raise SystemExit(1)
+    else:
+        log(LogLevel.Info, 'Successfully generated SSH host keys')
         
+publicKey = file('host_rsa.pub', 'r').read()
+privateKey = file('host_rsa', 'r').read()
 
-        return
+class SSHFactory(conch_factory.SSHFactory):
+    """
+    This SSHFactory is responsible for generating SSHSessions.
+    """
+    publicKeys = {
+            'ssh-rsa': keys.Key.fromString(data=publicKey)
+            }
+    privateKeys = {
+            'ssh-rsa': keys.Key.fromString(data=privateKey)
+            }
+    services = {
+            'ssh-userauth': userauth.SSHUserAuthServer,
+            'ssh-connection': connection.SSHConnection
+            }
+    pass
+
+class SSHServerProtocol(insults.ServerProtocol):
+    implements(IUserProtocol)
+    def __init__(self, user, width=80, height=24):
+        insults.ServerProtocol.__init__(self, SSHProtocol, user, width, height)
+    
+    def write_line(self, line):
+        if self.terminalProtocol:
+            self.terminalProtocol.write_line(line)
+
+    def resize(self, width, height):
+        if self.terminalProtocol:
+            self.terminalProtocol.terminalSize(width, height)
+
+
+class SSHProtocol(recvline.HistoricRecvLine):
+    """
+    Presents a user interface for sending and receiving text.
+    """
+
+    def __init__(self, user=None, width=80, height=24):
+        recvline.HistoricRecvLine.__init__(self)
+        self.scrollback = []
+        self.user = user
+        self.width = width
+        self.height = height
+
+    # Override methods
+
+    def connectionMade(self):
+        recvline.HistoricRecvLine.connectionMade(self)
+        self.keyHandlers['\x08'] = self.handle_BACKSPACE # Make ^H work like ^?
+        self.keyHandlers['\x15'] = self.handle_CTRL_U # Make ^U clear the input
+        self.keyHandlers['\x01'] = self.handle_HOME   # Make ^A work like Home
+        self.keyHandlers['\x05'] = self.handle_END    # Make ^E work like End
+        self.keyHandlers['\x0c'] = self.handle_CTRL_L # Redraws the screen
+        self.write_line("Debug: SSHProtocol welcomes you")
+
+    def initializeScreen(self):
+        self.terminal.reset()
+        self.terminalSize(self.width, self.height)
+        self.setInsertMode()
+
+    def terminalSize(self, width, height):
+        self.width = width
+        self.height = height
+        self.terminal.setScrollRegion(0, height - 4)
+        self.redraw()
+
+    def handle_HOME(self):
+        self._cpos_input(len(self.ps[self.pn]))
+        #self.show_prompt()
+        self.lineBufferIndex = 0
+
+    def handle_END(self):
+        n = len(self.lineBuffer) + len(self.ps[self.pn])
+        w = self.width
+        self._cpos_input(n%w, n/w)
+        self.lineBufferIndex = len(self.lineBuffer)
+
+    def _deliverBuffer(self, buf):
+        # GROSS HACK
+        self.terminal.eraseToDisplayEnd()
+        recvline.HistoricRecvLine._deliverBuffer(self, buf)
+
+    #def keystrokeReceived(self, keyID, modifier):
+        # XXX Debug only please remove
+        #log(LogLevel.Trace, 'Keypress: {0}'.format(repr(keyID)))
+        #recvline.HistoricRecvLine.keystrokeReceived(self, keyID, modifier)
+
+    # Unique methods
+    def handle_CTRL_L(self):
+        """Standard "redraw screen" keypress"""
+        self.redraw()
+
+    def handle_CTRL_U(self):
+        """Standard "clear line" keypress"""
+        self.handle_HOME()
+        self.terminal.eraseToDisplayEnd()
+        self.lineBuffer = []
+
+    def show_prompt(self):
+        self.terminal.write(self.ps[self.pn])
+
+    def lineReceived(self, line):
+        if line == 'exit':
+            self.terminal.loseConnection()
+        log(LogLevel.Debug, "Received line: {0}".format(line))
+        try:
+            self.user.process_line(line)
+        except Exception as ex:
+            from traceback import print_exc
+            print_exc(ex)
+            self.write_line("Suddenly the dungeon collapses!! You die... (Server error)")
+            self.terminal.loseConnection()
+        self._cpos_input()
+        self.terminal.eraseToDisplayEnd()
+        self.drawInputLine()
+
+    def write_line(self, line):
+        """
+        Writes a line to the screen on the line above the input line,
+        pushing existing lines upwards.
+        """
+        if len(self.scrollback) > 500:
+            self.scrollback.pop(0)
+        self.scrollback.append(line)
+
+        self.terminal.saveCursor()
+        self._cpos_print()
+        self.terminal.nextLine()
+        self.terminal.write(line)
+        self.terminal.restoreCursor()
+
+    def restore_scrollback(self):
+        """
+        Redraws scrollback onto the screen.
+        """
+        self._cpos_print()
+        for line in self.scrollback[-self.height:]:
+            self.terminal.nextLine()
+            self.terminal.write(line)
+
+    def redraw(self):
+        """
+        Redraws the screen, restoring scrollback and current input line.
+        Should be used when screen size changes.
+        """
+        self.terminal.eraseDisplay()
+        self.restore_scrollback()
+        self.terminal.cursorPosition(0, self.height - 4)
+        self.terminal.write('='*self.width)
+        self.drawInputLine()
+
+    def _cpos_input(self, offset=0, line_offset=0):
+        """
+        Positions the cursor at the input position.
+        """
+        self.terminal.cursorPosition(offset, self.height + line_offset - 3)
+
+    def _cpos_print(self):
+        """
+        Positions the cursor at the output (print) position.
+        """
+        self.terminal.cursorPosition(0, self.height - 5)

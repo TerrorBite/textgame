@@ -56,28 +56,33 @@ deleted table:
     The details of the deleted object with that ID are then overwritten with those of the new object, and the old object is lost forever.
     This system allows IDs to be reused and doesn't leave "holes" in the database.
 
-inventory table:
+inventory table: TODO: Inventory table nuked because an index on the objects table is just as fast, if not faster.
     Stores which objects contain which other objects. This is a many-to-one relationship table.
     This is basically just a fast lookup table to quickly get a list of objects contained by another.
     The "parent" field of the objects table is authorative, and if needed, the inventory table can be entirely rebuilt from the objects table.
     
     Every object must have a parent, and cannot have multiple parents, but can contain multiple child objects.
-    All objects must be able to trace their "ancestry" back to ID 0, forming a tree structure rooted at Room #0, whose parent is itself.
+    All objects must be able to trace their "ancestry" back to ID 0, forming a tree structure rooted at Room #0, whose "parent" is itself.
     The ancestry constraint sensibly prevents an object from ever containing itself, its parent, or one of its ancestors.
 
     Certain types of object are limited in what they can contain:
     - Rooms: May contain any type, including other Rooms.
+        - A room's purpose is to contain other objects.
     - Players: May contain Items, Scripts, Actions and even other Players, but not Rooms.
+        - A player may contain another in order to allow a player to "ride" or "carry" another.
     - Items: May contain other Items, Scripts, and Actions, but not Rooms or Players.
     - Scripts: Identical to Items.
+        - See SCRIPTS for explanation.
     - Actions: Cannot contain anything.
+        - Actions exist almost as "labels" to be activated, and don't really have contents.
 
     Fields:
     - parent: The ID of the containing object.
     - child: The ID of an object contained by parent.
 
 
-messages table: Contains the values for the various messages that an object may have.
+messages table: TODO: Messages table nuked in favor of storing messages in properties (via props table).
+    Contains the values for the various messages that an object may have.
     This will generally only contain rows for Actions and Items.
     All values are varchars, and all may be null, in which case no message is displayed.
     
@@ -112,6 +117,16 @@ acl table:
 
     - acl: An access list, basically a list of player IDs with permission to modify this object. Access lists are inherited from the parent.
     - props: Properties, which is an arbitrary dictionary of string key/value pairs, whose values may themselves be a dictionary.
+        TODO: Should this say flags instead of properties?
+
+TODO: Messages replaced by properties. The properties are:
+    @desc: _/desc
+    @succ: _/succ
+    @osucc: _/osucc
+    @fail: _/fail
+    @ofail: _/ofail
+    @drop: _/drop
+    @odrop: _/odrop
 
 FLAGS
     G: God
@@ -123,25 +138,36 @@ FLAGS
     M: moderator
     H: helper
     
+    a: ACCESSLIST
+        - Activates ACLs on the object. See ACCESS LISTS for details. (Is this flag needed?)
     e: ENVIRONMENT
+        - Only applicable to Rooms.
         - Room: Marks this room as an Environment room. It becomes the default parent for any new Rooms created by a player standing in it or any non-Environment child rooms.
     p: PUBLIC
-        - Room: Any user may now use this Room as a parent room. By default, only the owner of a room can use it as a parent.
+        - Room: Any user may now use this Room as a parent room (i.e. create child rooms in this room).
+            By default, only the owner of a room can use it as a parent for other rooms.
         - Action: If this Action is in a user's inventory, then anyone in the same room can use the Action (safe?).
             Note that actions made Public in this way will not override existing ones; they are used only if no other exists.
-            These type of Actions can only run scripts, they cannot transport the invoking player anywhere.
+            These type of Actions can only run scripts, they cannot transport the invoking player anywhere. (Why not?)
+        - Script: The script may be executed by anyone. By default, scripts may only be executed by their owner.
+        - ??Item/Player: Any user may access the contents of this thing. (Needed/desirable?)
     l: LINKABLE (public)
         - Room: allows any player to set their home here, overriding the lock.
         - Script: allows actions to be publically linked to the script, overriding the lock.
+            By default, the lock is checked.
     i: INVISIBLE
         - Item, Script, Action or Player: hides the item from the respective list (item's owner can still see it).
         - Room: makes that room "dark", meaning that a Player cannot see any other Players or Items in the room (but can still hear them, unless Silent is also set).
     s: SILENT
+        - A player may not set this flag on themselves.
         - Item, Player: will cause messages to be suppressed when it enters or leaves a room, allowing movement without being noticed.
+        - Action: Suppresses the default messages that an action would produce in the absence of user-defined messages.
         - On a Room, will cause silence within the room by preventing players from speaking and performing actions. 
     x: XLOCK
         When checking the lock list, ALL of the locks must be passed instead of just one.
-    u: LOCKED
+    k: LOCKED
+        Marks the item as locked.
+        By default the lock list is checked anyway
         The result of checking the lock list is inverted, so that players will pass the lock UNLESS they match it.
     t: TRANSPARENT
         - Room: causes messages from the parent room to be shown in this room, while messages in this room are broadcast into the parent room.
@@ -150,17 +176,28 @@ FLAGS
         - Item: Players and objects may warp to the same room as this item, only if the room is also warpable (?)
     
 LOCKS
+    The general purpose of a lock is to control who can access or activate an object.
+    Modify access to an object is dealt with mainly through ACLs.
+
     Locks are checked for different reasons depending on object type:
-        - Action: The lock list is checked when the user tries to trigger the action.
+        - Action: The lock list is checked when the user tries to trigger (use) the action.
         - Script: The lock list is checked when a user tries to link an action to this script.
         - Room: The lock list is checked when a user tries to drop an item in this room.
         - Player: The lock list is checked when another player tries to pick up and carry this player.
-        - Item: The lock list is checked when a player tries to pick up this item.
+        - Item: The lock list is checked when a player tries to pick up this item.??
+
+    The owner of an object automatically passes the lock on that object no matter what the lock is set to.
     
     The lock list is made up of a list of IDs. When the lock is checked, each ID in the list is first resolved to a boolean value as follows:
         - Player ID: true only if it matches the ID of the player who triggered the lock check.
+            The most basic of locks, essentially just a simple list of allowed players.
         - Item ID: true if the inventory of the triggering player contains an object with this ID.
-        - Script ID: the script is executed, and gives true if the script returns success, or false on failure.
+            This type of lock essentially requires a player to be carrying the correct "key".
+            This can be used e.g. to implement quest scenarios where a player must locate and obtain
+            some particular item in order to activate a device or open an exit.
+        - Script ID: Under the right conditions, the script is executed, and gives true if the script returns success, or false on failure.
+            This allows complex lock conditions to be built as a script.
+            - The script must either have the same owner as the locked object, or be set p:PUBLIC, otherwise it will resolve to false.
         - Room and Action IDs are invalid, and will always resolve to false.
     
     The resulting list of boolean values is then treated as follows:
@@ -181,7 +218,7 @@ NEW ITEMS
 
     New Players:
         Obviously only created upon a new user registering. The Player object will be created in the server's configured room for newbies.
-        By default, players are locked to themselves.
+        By default, players are locked to themselves (to prevent accidents).
     New Items, Scripts and Actions:
         Will be created in the inventory of the creating player.
     New Rooms:
@@ -195,7 +232,7 @@ SCRIPTS
     - By default an Action with a Script destination will succeed. However, Scripts may explicitly return failure, which causes the Action that called it to fail. The Action will also fail if a script contains errors.
     - The success value holds the executable text of the script itself.
     - The failure value and external values are unused at the current time.
-    - A script may access its own properties as a kind of persistant global storage. Generally though, such storage would be done on the Action that calls it.
+    - A script may access its own properties as a kind of persistant global storage. Generally though, such storage would be done on the Action that calls it. (Why?)
     - The lock value controls who may link an Action to the script. Anyone may link to an unlocked script.
 
 ACTIONS
@@ -219,5 +256,17 @@ Players INTERACT. Rooms CONTAIN. Actions TRANSPORT. Items EXIST. Scripts MODIFY.
 
 
 
-
 Players can be connected to, can perform actions, and can move between rooms.
+
+Commands
+
+    There are two distinct types of commands.
+
+    At-commands (@commands) are prefixed by the @ symbol and are entered as "@create", "@quit", etc.
+    These commands generally modify or examine objects and are not generally useful during roleplay.
+    These commands CANNOT be overridden by Actions - the @ prefix designates it as a system command.
+
+    Natural commands are words like "look", "go", "inventory", or "help" and are invoked simply by typing the command's name.
+    These commands may be overridden by an Action with the same name, allowing their behaviour to be modified. They exist to facilitate roleplay through the use of natural language.
+    Some at-commands may have natural commands as an alias, to assist players who are used to other MU* systems. Like any natural command these aliases can be overridden, although the at-command itself cannot.
+

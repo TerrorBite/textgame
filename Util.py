@@ -58,10 +58,12 @@ def enum(*args, **named):
                 return n
             def __cmp__(self, other):
                 if isinstance(other, int): return n.__cmp__(other)
-                if isinstance(other, EnumValue) and h==other._hash: return n.__cmp__(other.value())
+                if hasattr(other, '_hash') and h==other._hash: return n.__cmp__(other.value())
                 return NotImplemented
             def __getitem__(self, x):
                 return (s, n)[x]
+            def __hash__(self): return h+n
+            def __eq__(self, other): return other is self or n.__eq__(other)
             def name(self): return s
             def value(self): return n
         return EnumValue
@@ -107,7 +109,7 @@ Definitions:
 
     Trace: Intended for in-depth debugging. Used to log every detail of program operation to track down program errors.
 """
-LogLevel = enum('Fatal', 'Error', 'Warn', 'Notice', 'Info', 'Debug', 'Trace')
+LogLevel = enum('Trace', 'Debug', 'Info', 'Notice', 'Warn', 'Error', 'Fatal')
 
 loglevel = LogLevel.Info
 
@@ -116,10 +118,13 @@ def setLogLevel(level):
     global loglevel
     loglevel = level
 
+import sys
 def log(level, message):
-    if level > loglevel: return
-    if loglevel >= LogLevel.Debug:
+    if level < loglevel:
+        print level, loglevel
+        return
+    if loglevel <= LogLevel.Debug:
         frm = inspect.stack()[1]
         mod = inspect.getmodule(frm[0])
-        print "{0} [{1}/{3}] {2}".format(time.strftime('[%H:%M:%S]'), level.name().upper(), message, mod.__name__)
-    else: print "{0} [{1}] {2}".format(time.strftime('[%H:%M:%S]'), level.name().upper(), message)
+        sys.stdout.write("{0} [{1}/{3}] {2}\r\n".format(time.strftime('[%H:%M:%S]'), level.name().upper(), message, mod.__name__) )
+    else: sys.stdout.write("{0} [{1}] {2}\r\n".format(time.strftime('[%H:%M:%S]'), level.name().upper(), message) )
