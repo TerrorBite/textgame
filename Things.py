@@ -123,7 +123,7 @@ class Thing(object):
         #in future put extra processing here
         return self.desc if self.desc else "You see nothing special."
     
-    def get_flag(self, flag):
+    def hasflag(self, flag):
         return False # or True if that flag is set
 
 class Player(Thing):

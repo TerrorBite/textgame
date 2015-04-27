@@ -18,6 +18,9 @@ from User import SSHUser, IUserProtocol, State
 
 class BareUserProtocol(protocol.Protocol):
     implements(IUserProtocol)
+    """
+    Processes a basic user session - a raw connection with no UI presented to the user.
+    """
 
     # TODO: Move BasicUserSession code in here
 
@@ -32,9 +35,10 @@ class BareUserProtocol(protocol.Protocol):
     def dataReceived(self, data):
         "When data is received, process it according to state."
         if self.sshmode:
+            # TODO: Is "sshmode" ever used now that everything is split out into SSHProtocol?
             self.transport.write(data)
             if data == '\r': self.transport.write('\n')
-        data = data.translate('\r', '\n')
+            data = data.translate('\r', '\n')
             # Split to completed lines
             lines = filter(len, data.split('\n')) # eliminate empty lines
             lines[0] = self.buf+lines[0]
@@ -45,7 +49,6 @@ class BareUserProtocol(protocol.Protocol):
             self.buf += data
 
 class BasicUserSession(protocol.Protocol):
-
     def __init__(self, avatar=None):
         self.player = None
         self.buf = ''
@@ -80,6 +83,10 @@ class BasicUserSession(protocol.Protocol):
 class SSHRealm:
     """
     This simple realm generates User instances.
+
+    This is basically a factory for SSHUser instances. Upon a successful SSH login,
+    the SSHRealm is provided with the username, and uses it to create and return
+    an appropriate User instance.
     """
     implements(portal.IRealm)
 
@@ -90,38 +97,63 @@ class SSHRealm:
             log(LogLevel.Error, "SSHRealm: No supported interfaces")
             raise NotImplementedError("No supported interfaces found.")
 
-import os, sys
-if not os.path.exists('host_rsa'):
-    if not sys.platform.startswith('linux'):
-        log(LogLevel.Error, "SSH host keys are missing and I don't know how to generate them on this platform")
-        log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
-        raise SystemExit(1)
-    log(LogLevel.Warn, 'SSH host keys are missing, invoking ssh-keygen to generate them')
-    ret = os.spawnl(os.P_WAIT, '/usr/bin/env', 'ssh-keygen', 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
-    if ret != 0:
-        log(LogLevel.Error, 'Failed generating SSH host keys. Is ssh-keygen installed on this system?')
-        raise SystemExit(1)
-    else:
-        log(LogLevel.Info, 'Successfully generated SSH host keys')
-        
-publicKey = file('host_rsa.pub', 'r').read()
-privateKey = file('host_rsa', 'r').read()
 
-class SSHFactory(conch_factory.SSHFactory):
+def SSHFactoryFactory(world):
     """
-    This SSHFactory is responsible for generating SSHSessions.
+    Creates and returns a factory class that produces SSH sessions.
+
+    This function is responsible for loading the SSH host keys that our
+    SSH server will use, or generating them if they do not exist (if possible).
     """
-    publicKeys = {
-            'ssh-rsa': keys.Key.fromString(data=publicKey)
-            }
-    privateKeys = {
-            'ssh-rsa': keys.Key.fromString(data=privateKey)
-            }
-    services = {
-            'ssh-userauth': userauth.SSHUserAuthServer,
-            'ssh-connection': connection.SSHConnection
-            }
-    pass
+
+    import os, sys
+    if not os.path.exists('host_rsa'):
+        if not sys.platform.startswith('linux'):
+            log(LogLevel.Error, "SSH host keys are missing and I don't know how to generate them on this platform")
+            log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
+            raise SystemExit(1)
+        log(LogLevel.Warn, 'SSH host keys are missing, invoking ssh-keygen to generate them')
+        ret = os.spawnl(os.P_WAIT, '/usr/bin/env', 'ssh-keygen', 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
+        if ret != 0:
+            log(LogLevel.Error, 'Failed generating SSH host keys. Is ssh-keygen installed on this system?')
+            raise SystemExit(1)
+        else:
+            log(LogLevel.Info, 'Successfully generated SSH host keys')
+            
+    publicKey = file('host_rsa.pub', 'r').read()
+    privateKey = file('host_rsa', 'r').read()
+
+    import Database
+    from twisted.cred.portal import Portal
+    class SSHFactory(conch_factory.SSHFactory):
+        """
+        Factory responsible for generating SSHSessions.
+
+        This SSHFactory is functionaly identical to the built-in Conch
+        SSHFactory, but is pre-configured with our SSH host keys.
+
+        We also configure the SSHFactory with the services we are providing.
+        In this case we are using the built-in Conch SSHUserAuthServer to
+        authenticate users, and the built-in SSHConnection class to handle
+        incoming connections. These built-in classes are configured via the
+        Portal that is stored in the portal attribute.
+        """
+        publicKeys = {
+                'ssh-rsa': keys.Key.fromString(data=publicKey)
+                }
+        privateKeys = {
+                'ssh-rsa': keys.Key.fromString(data=privateKey)
+                }
+        services = {
+                'ssh-userauth': userauth.SSHUserAuthServer,
+                'ssh-connection': connection.SSHConnection
+                }
+        # This Portal tells us how to authenticate users
+        portal = Portal(SSHRealm(), [Database.CredentialsChecker(world.db)])
+
+    return SSHFactory()
+    # End of SSH host key loading code
+
 
 class SSHServerProtocol(insults.ServerProtocol):
     implements(IUserProtocol)
@@ -183,7 +215,7 @@ class SSHProtocol(recvline.HistoricRecvLine):
         self.lineBufferIndex = len(self.lineBuffer)
 
     def _deliverBuffer(self, buf):
-        # GROSS HACK
+        # XXX: GROSS HACK
         self.terminal.eraseToDisplayEnd()
         recvline.HistoricRecvLine._deliverBuffer(self, buf)
 
