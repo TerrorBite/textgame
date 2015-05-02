@@ -124,6 +124,7 @@ class Thing(object):
         return self.desc if self.desc else "You see nothing special."
     
     def hasflag(self, flag):
+        # TODO: Implement this!
         return False # or True if that flag is set
 
 class Player(Thing):
@@ -143,7 +144,7 @@ class Player(Thing):
         or of a particular exit if specified."""
         if exit is None: return "You see {0}.\r\n{1}\r\nExits: {2}".format(self.parent.name, self.parent.get_desc_for(self),
                 ', '.join([x.name for x in self.parent.contents if x.type is Action]))
-        if exit.lower() is 'me': return "You see {0}.\r\n{1}".format(self.name, self.get_desc_for(self))
+        if exit.lower() == 'me': return "You see {0}.\r\n{1}".format(self.name, self.get_desc_for(self))
 
         stuff = self.parent.contents + self.contents
         return "You can't see that clearly. (Not yet implemented)"
@@ -152,12 +153,15 @@ class Player(Thing):
     def go(self, action):
         """Finds an action named action and executes it."""
         # TODO: Execute actions
-        actions = filter(lambda x: x.type is Action, self.parent.contents + self.contents)
+        #actions = filter(lambda x: x.type is Action, self.parent.contents + self.contents)
+        actions = [x for x in self.parent.contents + self.contents if x.type is Action]
         log(LogLevel.Trace, "Found actions: {0}".format(repr(actions)))
         if exit.startswith('#'):
-            actions = filter(lambda x: exit[1:] == x.id(), actions)
+            actions = [x for x in actions if exit[1:] == x.id()]
+            #actions = filter(lambda x: exit[1:] == x.id(), actions)
         else:
-            actions = filter(lambda x: x.name.lower().startswith(exit.lower()), actions)
+            actions = [x for x in actions if x.name.lower.startswith(exit.lower)]
+            #actions = filter(lambda x: x.name.lower().startswith(exit.lower()), actions)
         if not actions: return "You can't go that way."
         elif len(actions) > 1: return "I don't know which one you mean!"
 
@@ -183,6 +187,7 @@ class Action(Thing):
     # ^ I was either drunk or really tired when I wrote this code
 
     def use(self, user):
+        # NOTE: What does it mean to "use" an item? Is this item-defined? Check spec
         log(LogLevel.Trace, "{0} used {1}".format(user, self))
 
 class Script(Thing):
