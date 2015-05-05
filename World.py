@@ -6,134 +6,136 @@ from twisted.internet import task
 import time
 
 def ThingProxyFactory(_world):
-class ThingProxy(object): 
-    """
-    Lightweight wrapper around a Thing object.
+    class ThingProxy(object): 
+        """
+        Lightweight wrapper around a Thing object.
 
-    The ThingProxy is a bit of Python magic that allows us to have object-like references to
-    Things without actually loading them from the database until needed.
+        The ThingProxy is a bit of Python magic that allows us to have object-like references to
+        Things without actually loading them from the database until needed.
 
-    Other Things may keep references to this proxy even when the Thing it wraps has been unloaded.
-    Attempts to access an unloaded Thing's attributes will trigger it to be reloaded from the database.
+        Other Things may keep references to this proxy even when the Thing it wraps has been unloaded.
+        Attempts to access an unloaded Thing's attributes will trigger it to be reloaded from the database.
 
-    The Problem:
+        The Problem:
 
-    We want to use referential attributes of a Thing as though they were themselves Things,
-    for example we could use 'myitem.parent.desc' to get the description of the room an item is in,
-    or perhaps 'myitem.owner.link.name' to find out what our item's owner's home is called.
+        We want to use referential attributes of a Thing as though they were themselves Things,
+        for example we could use 'myitem.parent.desc' to get the description of the room an item is in,
+        or perhaps 'myitem.owner.link.name' to find out what our item's owner's home is called.
 
-    However we do not want to directly reference another Thing! If we tried to do so, we would have
-    to load that Thing when we load the Thing that refers to it, and that in turn would require us
-    to load more Things, until we had loaded the entire database into memory... This would be wasteful
-    of memory and would result in a long intital loading time.
+        However we do not want to directly reference another Thing! If we tried to do so, we would have
+        to load that Thing when we load the Thing that refers to it, and that in turn would require us
+        to load more Things, until we had loaded the entire database into memory... This would be wasteful
+        of memory and would result in a long intital loading time.
 
-    One option is to lazy-load our referential attributes, i.e. to only load a Thing when we attempt
-    to read the attribute that returns it. We have solved our loading problem, but now we have an
-    unloading problem. We cannot unload a Thing from memory until there are no references left to it.
-    Eventually we would once again end up with most of the database in memory.
-    
-    The Solution:
-
-    The ThingProxy is a lightweight object. It stores only three values: a reference to a Thing, the database
-    ID of the Thing that it references, and a time value used for cache management. It behaves just like a Thing,
-    by passing all attribute access through to the real Thing, transparently loading the Thing if required.
-    
-    The canonical way to obtain a Thing is to call World.get_thing(id), which returns a ThingProxy for that id.
-    A new ThingProxy is only created if one does not already exist for the given id, so there should only ever
-    be one ThingProxy per Thing.
-
-    As a result, anywhere that a Thing would normally store a reference to another Thing, it instead stores a
-    reference to the Thing's ThingProxy. Upon first attribute access, the Thing is loaded from the database,
-    and the ThingProxy stores the reference to it. Note that the ThingProxy now holds the ONLY reference to
-    the Thing itself, as all other references are to the ThingProxy instead.
-
-    This solves the unloading problem, since now the only reference to the heavyweight Thing is in a known
-    location - in its corresponding ThingProxy, which the World has easy access to via its cache. To unload
-    a Thing from memory, the ThingProxy simply has to clear its reference to the Thing and let garbage
-    collection take care of the rest. The ThingProxy itself may be referred to from dozens of places, but
-    since it is so lightweight, it doesn't matter as much if a large amount of them end up in memory.
-    """
-
-    # Store a class-wide reference to the World that created us
-    world = _world
-
-    def __init__(self, world, objid):
-        object.__setattr__(self, '_thing', None)
-        object.__setattr__(self, '_id', objid)
-        object.__setattr__(self, 'cachetime', 0)
+        One option is to lazy-load our referential attributes, i.e. to only load a Thing when we attempt
+        to read the attribute that returns it. We have solved our loading problem, but now we have an
+        unloading problem. We cannot unload a Thing from memory until there are no references left to it.
+        Eventually we would once again end up with most of the database in memory.
         
-        # If there is already a cache entry for this id, then this is a Bad Thing,
-        # because that means two ThingProxies now exist for the same Thing.
-        assert objid not in world.cache, "Cache overwrite detected!"
+        The Solution:
 
-        # Cache ourself in the world
-        world.cache[objid] = self
+        The ThingProxy is a lightweight object. It stores only three values: a reference to a Thing, the database
+        ID of the Thing that it references, and a time value used for cache management. It behaves just like a Thing,
+        by passing all attribute access through to the real Thing, transparently loading the Thing if required.
         
-    def __repr__(self):
-        return "<ThingProxy({0}#{1}) at 0x{2:08x}>".format(self._thing.type.__name__ if self._thing else 'Unknown', self._id, id(self))
+        The canonical way to obtain a Thing is to call World.get_thing(id), which returns a ThingProxy for that id.
+        A new ThingProxy is only created if one does not already exist for the given id, so there should only ever
+        be one ThingProxy per Thing.
 
-    def __getattr__(self, name):
-        # Note that __getattr__ is only called for attributes that do not already exist
-        #log(LogLevel.Trace, "Attempting access for (#{0}).{1}".format(self._id, name))
+        As a result, anywhere that a Thing would normally store a reference to another Thing, it instead stores a
+        reference to the Thing's ThingProxy. Upon first attribute access, the Thing is loaded from the database,
+        and the ThingProxy stores the reference to it. Note that the ThingProxy now holds the ONLY reference to
+        the Thing itself, as all other references are to the ThingProxy instead.
 
-        # We use __getattribute__ here, just in case self._thing doesn't
-        # exist for some reason (which would cause an infinite loop).
-        thing = object.__getattribute__(self, '_thing')
-        if not thing:
-            # Thing isn't loaded. Load it
-            thing = self.world.load_object(self._id)
-            assert thing is not None, "The thing in {0} is None! This shouldn't happen".format(self)
-            # Use object.__setattr__ to set self._thing because we overrode our own __setattr__
-            object.__setattr__(self, '_thing', thing)
-            # Add ourselves to the live set, this tells the World to consider us for unloading
-            self.world.live_set.add(self)
-        self.cachetime = int(time.time())
-        return getattr(thing, name) 
+        This solves the unloading problem, since now the only reference to the heavyweight Thing is in a known
+        location - in its corresponding ThingProxy, which the World has easy access to via its cache. To unload
+        a Thing from memory, the ThingProxy simply has to clear its reference to the Thing and let garbage
+        collection take care of the rest. The ThingProxy itself may be referred to from dozens of places, but
+        since it is so lightweight, it doesn't matter as much if a large amount of them end up in memory.
+        """
 
-    def __setattr__(self, name, value):
-        if not hasattr(self, name):
-            if not self._thing:
-                object.__setattr__(self, '_thing', self._world.load_object(self._id))
-                self._world.live_set.add(self)
+        # Store a class-wide reference to the World that created us
+        world = _world
+
+        def __init__(self, world, objid):
+            object.__setattr__(self, '_thing', None)
+            object.__setattr__(self, '_id', objid)
+            object.__setattr__(self, 'cachetime', 0)
+            
+            # If there is already a cache entry for this id, then this is a Bad Thing,
+            # because that means two ThingProxies now exist for the same Thing.
+            assert objid not in world.cache, "Cache overwrite detected!"
+
+            # Cache ourself in the world
+            world.cache[objid] = self
+            
+        def __repr__(self):
+            return "<ThingProxy({0}#{1}) at 0x{2:08x}>".format(self._thing.type.__name__ if self._thing else 'Unknown', self._id, id(self))
+
+        def __getattr__(self, name):
+            # Note that __getattr__ is only called for attributes that do not already exist
+            #log(LogLevel.Trace, "Attempting access for (#{0}).{1}".format(self._id, name))
+
+            # We use __getattribute__ here, just in case self._thing doesn't
+            # exist for some reason (which would cause an infinite loop).
+            thing = object.__getattribute__(self, '_thing')
+            if not thing:
+                # Thing isn't loaded. Load it
+                thing = self.world.load_object(self._id)
+                assert thing is not None, "The thing in {0} is None! This shouldn't happen".format(self)
+                # Use object.__setattr__ to set self._thing because we overrode our own __setattr__
+                object.__setattr__(self, '_thing', thing)
+                # Add ourselves to the live set, this tells the World to consider us for unloading
+                self.world.live_set.add(self)
             self.cachetime = int(time.time())
-            return setattr(self._thing, name, value)
-        return object.__setattr__(self, name, value)
-    
-    # This is pretty much a direct copy/paste from Thing
-    def __getitem__(self, key):
-        """
-        Thing property getter.
-        """
-        return self._world.db.get_property(self._id, key)
+            return getattr(thing, name) 
 
-    # This is pretty much a direct copy/paste from Thing
-    def __setitem__(self, key, value):
-        """
-        Thing property setter.
-        """
-        self._world.db.set_property(self._id, key, value)
+        def __setattr__(self, name, value):
+            if not hasattr(self, name):
+                if not self._thing:
+                    object.__setattr__(self, '_thing', self._world.load_object(self._id))
+                    self._world.live_set.add(self)
+                self.cachetime = int(time.time())
+                return setattr(self._thing, name, value)
+            return object.__setattr__(self, name, value)
+        
+        # This is pretty much a direct copy/paste from Thing
+        def __getitem__(self, key):
+            """
+            Thing property getter.
+            """
+            return self._world.db.get_property(self._id, key)
 
-    # Override underlying Thing's id property so that we don't trigger
-    # a Thing reload just to obtain the ID that we already store
-    @property
-    def id(self):
-        """
-        Gets the database ID for this Thing. Read-only.
-        """
-        return self._id
+        # This is pretty much a direct copy/paste from Thing
+        def __setitem__(self, key, value):
+            """
+            Thing property setter.
+            """
+            self._world.db.set_property(self._id, key, value)
 
-    def unload(self):
-        """
-        Forces the Thing referred to by this ThingProxy to be unloaded.
-        """
-        if self._thing:
-            self._thing.save()
-            self._thing = None
-        # remove ourself from the live set
-        self._world.live_set.discard(self)
+        # Override underlying Thing's id property so that we don't trigger
+        # a Thing reload just to obtain the ID that we already store
+        @property
+        def id(self):
+            """
+            Gets the database ID for this Thing. Read-only.
+            """
+            return self._id
+
+        def unload(self):
+            """
+            Forces the Thing referred to by this ThingProxy to be unloaded.
+            """
+            if self._thing:
+                self._thing.save()
+                self._thing = None
+            # remove ourself from the live set
+            self._world.live_set.discard(self)
 
 class World(object):
-    """The World class represents the game world. It manages the collection of objects that together comprise the world."""
+    """
+    The World class represents the game world. It manages the collection of objects that together comprise the world.
+    """
 
     def __init__(self):
         self.db = Database()
