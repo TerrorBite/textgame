@@ -87,14 +87,16 @@ def ThingProxyFactory(_world):
                 object.__setattr__(self, '_thing', thing)
                 # Add ourselves to the live set, this tells the World to consider us for unloading
                 self.world.live_set.add(self)
-            self.cachetime = int(time.time())
+            # FIXME: move dirty attribute to ThingProxy
+            if name=='dirty':
+                self.cachetime = int(time.time())
             return getattr(thing, name) 
 
         def __setattr__(self, name, value):
             if not hasattr(self, name):
                 if not self._thing:
-                    object.__setattr__(self, '_thing', self._world.load_object(self._id))
-                    self._world.live_set.add(self)
+                    object.__setattr__(self, '_thing', self.world.load_object(self._id))
+                    self.world.live_set.add(self)
                 self.cachetime = int(time.time())
                 return setattr(self._thing, name, value)
             return object.__setattr__(self, name, value)
@@ -104,14 +106,14 @@ def ThingProxyFactory(_world):
             """
             Thing property getter.
             """
-            return self._world.db.get_property(self._id, key)
+            return self.world.db.get_property(self._id, key)
 
         # This is pretty much a direct copy/paste from Thing
         def __setitem__(self, key, value):
             """
             Thing property setter.
             """
-            self._world.db.set_property(self._id, key, value)
+            self.world.db.set_property(self._id, key, value)
 
         # Override underlying Thing's id property so that we don't trigger
         # a Thing reload just to obtain the ID that we already store
@@ -130,7 +132,9 @@ def ThingProxyFactory(_world):
                 self._thing.save()
                 self._thing = None
             # remove ourself from the live set
-            self._world.live_set.discard(self)
+            self.world.live_set.discard(self)
+        
+    return ThingProxy
 
 class World(object):
     """
@@ -143,6 +147,7 @@ class World(object):
         self.live_set = set() # The live set tracks ThingProxies that are keeping Things loaded
         self.cache_task = task.LoopingCall(self.purge_cache)
         self.cache_task.start(300)
+        self.ThingProxy = ThingProxyFactory(self)
         pass
 
     def close(self):
@@ -167,7 +172,7 @@ class World(object):
         """
         if not obj in self.cache:
             log(LogLevel.Trace, "Cache: MISS #{0}".format(obj))
-            return ThingProxy(self, obj)
+            return self.ThingProxy(self, obj)
         else:
             log(LogLevel.Trace, "Cache: Hit #{0}".format(obj))
             return self.cache[obj]
