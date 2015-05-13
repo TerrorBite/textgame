@@ -2,3 +2,5 @@
 *~
 *.swp
 *.db
+host_rsa
+host_rsa.pub
