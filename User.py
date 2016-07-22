@@ -15,6 +15,9 @@ State = enum('New', 'LoggedIn')
 prelogincmds = []
 commands = {}
 class commandHandler:
+    """
+    Decorator that marks a method as a command handler.
+    """
     def __init__(self, *aliases, **kwargs):
         self.cmds = aliases
         self.kwargs = kwargs
@@ -24,6 +27,16 @@ class commandHandler:
         if 'prelogin' in self.kwargs and self.kwargs['prelogin']:
             for cmd in self.cmds:
                 prelogincmds.append(cmd)
+
+class commandHelpText:
+    """
+    Decorator that easily lets help text be specified on a command.
+    """
+    def __init__(self, *text):
+        self.text = '\r\n'.join(text)
+    def __call__(self, f):
+        f.helptext = self.text
+        return f
 
 class IUserProtocol(Interface):
     def write_line(line):
@@ -68,14 +81,22 @@ class User(object):
     # Commands
 
     @commandHandler('i', 'inv', 'inventory')
+    @commandHelpText("Prints a listing of what you are carrying.")
     def cmd_inv(self, params):
+        """
+        Built in inventory command. Prints a listing of what the character is carrying.
+        """
         if self.my_state < State.LoggedIn:
             self.send_message("You're not connected to a character.")
             return
         self.send_message("You are carrying: {0}".format(', '.join(map(lambda x: x.name, self.player.contents))))
 
     @commandHandler('@create', 'create', prelogin=True)
+    @commandHelpText("Creates a new character.")
     def cmd_create(self, params):
+        """
+        Creates a new character.
+        """
         if self.my_state > State.New:
             self.send_message("You are already connected.")
             return
@@ -84,7 +105,11 @@ class User(object):
         return
 
     @commandHandler('@look', 'look')
+    @commandHelpText("Describes the room that you're in, and tells you what other objects are around you.")
     def cmd_look(self, params):
+        """
+        Built in look command. Simply returns the output of Player.look()
+        """
         if params:
             self.send_message(self.player.look(params[0]))
         else: 
@@ -92,6 +117,7 @@ class User(object):
         return
 
     @commandHandler('@debug')
+    @commandHelpText("Debugging commands for admin use only.")
     def cmd_debug(self, params):
         """
         This command exists for debugging purposes and
@@ -105,6 +131,7 @@ class User(object):
                 self.world.purge_cache(10)
 
     @commandHandler('@quit', 'QUIT', prelogin=True)
+    @commandHelpText("Disconnects you completely from the server.")
     def cmd_QUIT(self, params):
         """
         This command ends the user's connection after sending a goodbye message.
@@ -116,6 +143,7 @@ class User(object):
         return
 
     @commandHandler('@who', 'WHO', prelogin=True)
+    @commandHelpText("Shows you who is online.")
     def cmd_WHO(self, params):
         """
         This command lists the currently online users.
@@ -127,6 +155,7 @@ class User(object):
         return
 
     @commandHandler('@connect', 'connect', prelogin=True)
+    @commandHelpText("Connects you to one of your characters.")
     def cmd_connect(self, params):
         """
         This command allows a user to log in as a particular character.
@@ -149,6 +178,25 @@ class User(object):
         else:
             self.send_message("Your login failed. Try again.")
         return
+
+    @commandHandler('@help', prelogin=True)
+    @commandHelpText("Provides help on builtin commands.",
+            "Usage: @help <command>")
+    def cmd_help(self, params):
+        """
+        Builtin help command.
+        """
+        if len(params) < 1:
+            self.send_message("Here is a listing of help topics:")
+            self.send_message("TODO: Help")
+            return
+        keyword = params[0].lower()
+        if keyword in commands.keys() and hasattr(commands[keyword], 'helptext'):
+            self.send_message('Help for command "{0}":'.format(keyword))
+            self.send_message(commands[keyword].helptext)
+        else:
+            self.send_message('There is no help available for "{0}".'.format(keyword))
+        
 
     def complete_login(self):
         """
