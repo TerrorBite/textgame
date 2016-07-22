@@ -30,20 +30,25 @@ class IUserProtocol(Interface):
         """
         Sends a complete line of text to the user.
         """
+        pass # Interface method
 
     def resize(width, height):
         """
         Notify a terminal-based protocol of a change in window size.
         """
+        pass # Interface method
 
 class Prelogin(object):
     """
     Provides functionality for an unauthenticated user to authenticate and select a character.
     """
+    # TODO: What is this for?
 
 class User(object):
     """
     Represents a connected, online user, capable of running commands and receiving output.
+
+    This class is responsible for parsing incoming text from a user, acting on commands, etc.
     """
     def __init__(self, username, transport=None):
         self.transport = transport
@@ -88,24 +93,45 @@ class User(object):
 
     @commandHandler('@debug')
     def cmd_debug(self, params):
+        """
+        This command exists for debugging purposes and
+        is restricted to the admin user.
+        """
+        if self.player.id != 1:
+            self.send_message("You're not allowed to do that.")
+            return
         if params:
             if params[0] == 'cache':
                 self.world.purge_cache(10)
 
     @commandHandler('@quit', 'QUIT', prelogin=True)
     def cmd_QUIT(self, params):
+        """
+        This command ends the user's connection after sending a goodbye message.
+        It can be used when not logged in.
+        The "QUIT" variant exists for legacy reasons.
+        """
         self.send_message("Goodbye!")
         self.transport.loseConnection()
         return
 
     @commandHandler('@who', 'WHO', prelogin=True)
     def cmd_WHO(self, params):
+        """
+        This command lists the currently online users.
+        It can be used when not logged in.
+        The "WHO" variant exists for legacy reasons.
+        """
         # TODO: Track who's online
         self.send_message("Nobody else is connected.")
         return
 
     @commandHandler('@connect', 'connect', prelogin=True)
     def cmd_connect(self, params):
+        """
+        This command allows a user to log in as a particular character.
+        This can be used when not logged in, but requires a password to do so.
+        """
         log(LogLevel.Debug, "Received connect command from {0}".format(self.transport.getHost().host))
         if self.my_state > State.New:
             #Already connected
@@ -125,6 +151,9 @@ class User(object):
         return
 
     def complete_login(self):
+        """
+        This code is run when a character is successfully connected to.
+        """
         self.my_state = State.LoggedIn
         log(LogLevel.Notice, "{0}#{1} connected from {2}".format(self.player.name, self.player.id, '<unknown>'))
         # Make them look around and check their inventory
@@ -149,7 +178,7 @@ class User(object):
                 self.send_message("You're not connected to a character.")
             return
 
-        # Everything following this point can only be run on a logged in character.
+        # Code execution only proceeds beyond this point on a logged in character.
         # Check for common prefixes:
 
         # Builtin say command
