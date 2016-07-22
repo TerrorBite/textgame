@@ -1,4 +1,3 @@
-# vim: fileencoding=utf-8
 import Database
 import sqlite3, time
 from Util import log, LogLevel
@@ -109,7 +108,7 @@ class SqliteDatabase(Database.Database):
             #     (3, 0, 1, 'west', 3, 0, 0, "You gaze off to the west, if that is in fact west... it's hard to tell when you're in space.")]
             now = time.time()
 
-            #     id  name           t  f  p  o  link  m  creâ¦ modâ¦ used
+            #     id  name           t  f  p  o  link  m  cre. mod. used
             t = [(0, 'The Universe', 0, 0, 0, 0, None, 0, now, now, now, "The Universe contains all other things."),
                  (1, 'God',          1, 0, 0, 1, None, 0, now, now, now, "What you see cannot be described."),
                  # Other test objects
