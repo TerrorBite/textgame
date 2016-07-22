@@ -62,7 +62,8 @@ class SqliteDatabase(Database.Database):
 
         # The "meta" table is a simple key-value table that stores metadata about the database.
         if 'meta' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS meta (
+            c.execute("""-- Stores metadata about the database, such as schema version number.
+                    CREATE TABLE IF NOT EXISTS meta (
                     key TEXT PRIMARY KEY ASC,
                     value NONE
                     )""")
@@ -73,7 +74,10 @@ class SqliteDatabase(Database.Database):
         # Extended data is stored in a separate table. This is done in order to
         # make it faster to do basic queries about an object.
         if 'objects' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS objects (
+            c.execute("""-- This table stores basic data about an object.
+                    -- Extended data is stored in other tables, or as properties.
+                    -- This should make it faster to perform basic queries on an object.
+                    CREATE TABLE IF NOT EXISTS objects (
                     id INTEGER PRIMARY KEY ASC,     -- Primary database ID of this object (alias to built in rowid column)
                     name TEXT NOT NULL,             -- Name of the object
                     type INTEGER NOT NULL,          -- Type of the object (Room=0, Player=1, Item=2, Action=3, Script=4)
@@ -105,7 +109,7 @@ class SqliteDatabase(Database.Database):
             #     (3, 0, 1, 'west', 3, 0, 0, "You gaze off to the west, if that is in fact west... it's hard to tell when you're in space.")]
             now = time.time()
 
-            #     id  name           t  f  p  o  link  m  cre… mod… used
+            #     id  name           t  f  p  o  link  m  creâ¦ modâ¦ used
             t = [(0, 'The Universe', 0, 0, 0, 0, None, 0, now, now, now, "The Universe contains all other things."),
                  (1, 'God',          1, 0, 0, 1, None, 0, now, now, now, "What you see cannot be described."),
                  # Other test objects
@@ -119,12 +123,13 @@ class SqliteDatabase(Database.Database):
 
         # Create users table if it does not exist
         if 'users' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS users (
-                    username TEXT,
-                    password TEXT,
-                    salt TEXT,
-                    email TEXT,
-                    obj INTEGER,
+            c.execute("""-- Stores login information about user accounts.
+                    CREATE TABLE IF NOT EXISTS users (
+                    username TEXT, -- Username
+                    password TEXT, -- Password hash
+                    salt TEXT,     -- Salt used in hash
+                    email TEXT,    -- Email address
+                    obj INTEGER,   -- Character reference (TODO: Multiple characters)
                     FOREIGN KEY(obj) REFERENCES objects(id)
                     )""")
 
@@ -157,7 +162,12 @@ class SqliteDatabase(Database.Database):
 
         # Table for storing arbitrary 'properties' about an object.
         if 'props' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS props (
+            c.execute("""-- Stores arbitrary properties about an object.
+                    -- This is essentially a set of key/value pairs associated with an object.
+                    -- Each row holds a single key/value pair.
+                    -- At a database level, key names are arbitrary, but the server uses a
+                    -- directory structure maintained using a naming convention for the keys.
+                    CREATE TABLE IF NOT EXISTS props (
                     obj INTEGER,        -- ID of object
                     key TEXT,           -- Name of this property
                     value TEXT,         -- Value of this property
@@ -182,12 +192,16 @@ class SqliteDatabase(Database.Database):
         # with those of the new object, and the old object is lost forever.
         # This system allows IDs to be reused and doesn't leave "holes" in the database.
         if 'deleted' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS deleted (obj INTEGER, FOREIGN KEY(obj) REFERENCES object(id))""")
+            c.execute("""-- This simple table allows objects to be marked as deleted.
+                    -- This allows ID values to be reused.
+                    -- It also potentially allows recycled objects to be recovered.
+                    CREATE TABLE IF NOT EXISTS deleted (obj INTEGER, FOREIGN KEY(obj) REFERENCES object(id))""")
             log(LogLevel.Info, '- Created deleted IDs table.')
 
         # Many-to-many table for locks
         if 'locks' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS locks (
+            c.execute("""-- This many-to-many table contains basic locks for objects.
+                    CREATE TABLE IF NOT EXISTS locks (
                     obj INTEGER,
                     lock INTEGER,
                     FOREIGN KEY(obj) REFERENCES objects(id),
@@ -197,7 +211,8 @@ class SqliteDatabase(Database.Database):
 
         # Many-to-many table for access control list entries
         if 'acl' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS acl (
+            c.execute("""-- This many-to-many table contains Access Control List entries.
+                    CREATE TABLE IF NOT EXISTS acl (
                     obj INTEGER,
                     player INTEGER,
                     flags INTEGER,
@@ -207,7 +222,8 @@ class SqliteDatabase(Database.Database):
             log(LogLevel.Info, '- Created acl table.')
 
         if 'scripts' not in tables:
-            c.execute("""CREATE TABLE IF NOT EXISTS scripts (
+            c.execute("""-- This table stores the executable content of scripts.
+                    CREATE TABLE IF NOT EXISTS scripts (
                     obj INTEGER,                  -- ID of object
                     script TEXT,
                     FOREIGN KEY(obj) REFERENCES objects(id)
