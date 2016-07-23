@@ -270,3 +270,30 @@ Commands
     These commands may be overridden by an Action with the same name, allowing their behaviour to be modified. They exist to facilitate roleplay through the use of natural language.
     Some at-commands may have natural commands as an alias, to assist players who are used to other MU* systems. Like any natural command these aliases can be overridden, although the at-command itself cannot.
 
+ADDENDUM:
+    The software provides a minimal set of @-commands (system commands) that provide basic functions: creating objects and rooms, recycling objects, modifying or viewing object flags and properties, see where you are and what objects/exits are here, teleport around, and give a basic inventory listing. Everything else is expected to be provided via scripts, as most admins will want to customize the behaviour of many commands anyhow. Since the @-commands cannot be overridden, this provides a failsafe should the worst happen.
+
+    BUILTIN COMMANDS
+    Default syntax:
+    @cmd target=value
+
+    @inv : lists what you're carrying, or what something contains
+    @look : prints name of room you're in, its description, and contents (excluding other rooms).
+    @build,@dig : creates a room.
+    @create : creates an item.
+    @action,@exit : creates an action.
+    @script : creates a script.
+    @recycle : marks an object as recycled, effectively deleting it.
+    @password : Changes your password (god can change anyone's password).
+    @name : Changes the name of an object.
+    @flag : Sets flags on an object.
+    @set : Sets properties on an object.
+    @examine,@ex : Dumps info about an object.
+    @props : Lists properties on an object.
+    @get : Gets a specific property value for an object.
+    @link,@home : Link an object to another
+    @teleport,@tel : Teleports you or an object to a location
+    @sweep : Sends an object home (default: all objects in this room)
+    @pay : Pay currency to a player or object
+    @quit : Disconnects you
+    @kick : Lets admins disconnect other players
