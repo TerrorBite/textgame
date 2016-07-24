@@ -107,13 +107,15 @@ def SSHFactoryFactory(world):
     """
 
     import os, sys
+    from twisted.python.procutils import which
     if not os.path.exists('host_rsa'):
         if not sys.platform.startswith('linux'):
             log(LogLevel.Error, "SSH host keys are missing and I don't know how to generate them on this platform")
             log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
             raise SystemExit(1)
         log(LogLevel.Warn, 'SSH host keys are missing, invoking ssh-keygen to generate them')
-        ret = os.spawnl(os.P_WAIT, '/usr/bin/env', 'ssh-keygen', 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
+        keygen = which('ssh-keygen')[0]
+        ret = os.spawnl(os.P_WAIT, keygen, 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
         if ret != 0:
             log(LogLevel.Error, 'Failed generating SSH host keys. Is ssh-keygen installed on this system?')
             raise SystemExit(1)
