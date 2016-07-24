@@ -114,8 +114,12 @@ def SSHFactoryFactory(world):
             log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
             raise SystemExit(1)
         log(LogLevel.Warn, 'SSH host keys are missing, invoking ssh-keygen to generate them')
-        keygen = which('ssh-keygen')[0]
-        ret = os.spawnl(os.P_WAIT, keygen, 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
+        paths = which('ssh-keygen')
+        if len(paths) == 0:
+            log(LogLevel.Error, 'Could not find ssh-keygen on this system.')
+            log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
+            raise SystemExit(1)
+        ret = os.spawnl(os.P_WAIT, paths[0], 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
         if ret != 0:
             log(LogLevel.Error, 'Failed generating SSH host keys. Is ssh-keygen installed on this system?')
             raise SystemExit(1)
