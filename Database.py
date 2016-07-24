@@ -67,7 +67,7 @@ class Database(object):
 
     def close(self):
         log(LogLevel.Info, "Closing database connection.")
-        self.conn.close()
+        self.db_close()
         self.active = False
 
     def load_object(self, world, obj):

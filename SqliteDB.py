@@ -43,9 +43,14 @@ class SqliteDatabase(Database.Database):
         
         self.db_create_schema(c)
         c.close()
+        self.conn.commit()
     
     def _cursor(self):
         return Cursor(self.conn.cursor())
+
+    def db_close(self):
+        self.conn.commit()
+        self.conn.close()
 
     def db_create_schema(self, cursor=None):
         """
@@ -229,7 +234,6 @@ class SqliteDatabase(Database.Database):
                     )""")
             log(LogLevel.Info, '- Created scripts table.')
 
-        self.conn.commit()
         if not cursor: c.close()
     # end create_schema()
 
@@ -237,23 +241,20 @@ class SqliteDatabase(Database.Database):
         """
         Save an object to the database.
         """
-        c = self.conn.cursor()
-        c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, modified=?, lastused=?, desc=? WHERE id==?""",
-                (thing.parent.id, thing.owner.id, thing.name, thing.flags, thing.link.id if thing.link else None,
-                    thing.modified, thing.lastused, thing.desc, thing.id))
-        c.execute("""UPDATE messages SET succ=?, fail=?, osucc=?, ofail=?, 'drop'=? WHERE obj==?""",
-                (thing.desc, thing.succ, thing.fail, thing.osucc, thing.ofail, thing.drop, thing.id))
-        c.close()
+        with Cursor(self) as c:
+            c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, money=?, modified=?, lastused=?, desc=? WHERE id==?""",
+                    (thing.parent.id, thing.owner.id, thing.name, thing.flags, thing.link.id if thing.link else None,
+                        thing.money, thing.modified, thing.lastused, thing.desc, thing.id))
+            #c.execute("""UPDATE messages SET succ=?, fail=?, osucc=?, ofail=?, 'drop'=? WHERE obj==?""",
+            #        (thing.desc, thing.succ, thing.fail, thing.osucc, thing.ofail, thing.drop, thing.id))
 
     def db_load_object(self, obj):
         """
         Load object out of the database.
         """
-        c = self.conn.cursor()
-        c.execute("""SELECT name, type, flags, parent, owner, link, money, created, modified, lastused FROM objects WHERE id==?""", (obj,))
-        result = c.fetchone()
-        c.close()
-        return result
+        with Cursor(self) as c:
+            c.execute("""SELECT name, type, flags, parent, owner, link, money, created, modified, lastused FROM objects WHERE id==?""", (obj,))
+            return c.fetchone()
 
     def db_get_contents(self, obj):
         """

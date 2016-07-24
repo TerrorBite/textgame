@@ -58,9 +58,16 @@ def ThingProxyFactory(_world):
         world = _world
 
         def __init__(self, world, objid):
-            object.__setattr__(self, '_thing', None)
-            object.__setattr__(self, '_id', objid)
-            object.__setattr__(self, 'cachetime', 0)
+
+            # Our setattr is overridden, work around this.
+            self.__dict__.update({
+                '_thing': None,  # Reference to the underlying object
+                '_id':    objid, # Database ID of the object
+                'cachetime': 0,  # Used to calculate cache age
+                '_dirty': False, # If the underlying instance is "dirty", then it should
+                                 # be saved to the database by calling its save() method.
+            })
+
             
             # If there is already a cache entry for this id, then this is a Bad Thing,
             # because that means two ThingProxies now exist for the same Thing.
@@ -73,7 +80,13 @@ def ThingProxyFactory(_world):
             return "<ThingProxy({0}#{1}) at 0x{2:08x}>".format(self._thing.type.__name__ if self._thing else 'Unknown', self._id, id(self))
 
         def __getattr__(self, name):
-            # Note that __getattr__ is only called for attributes that do not already exist
+            """
+            Called when attempting to access an attribute that does not exist.
+
+            If this is the case, then we want to pass the access through to our underlying Thing.
+            If the Thing is not loaded, then we will load it now.
+            """
+            # Note that __getattr__ is ONLY called for attributes that do not already exist
             #log(LogLevel.Trace, "Attempting access for (#{0}).{1}".format(self._id, name))
 
             # We use __getattribute__ here, just in case self._thing doesn't
@@ -81,23 +94,31 @@ def ThingProxyFactory(_world):
             thing = object.__getattribute__(self, '_thing')
             if not thing:
                 # Thing isn't loaded. Load it
-                thing = self.world.load_object(self._id)
-                assert thing is not None, "The thing in {0} is None! This shouldn't happen".format(self)
-                # Use object.__setattr__ to set self._thing because we overrode our own __setattr__
-                object.__setattr__(self, '_thing', thing)
-                # Add ourselves to the live set, this tells the World to consider us for unloading
-                self.world.live_set.add(self)
-            # FIXME: move dirty attribute to ThingProxy
-            if name=='dirty':
-                self.cachetime = int(time.time())
+                thing = self._load_thing()
+            # I don't know why the two lines below are there:
+            #if name=='dirty':
+            #    self.cachetime = int(time.time())
             return getattr(thing, name) 
 
+        def _load_thing(self):
+            """
+            Called when the underlying Thing needs to be loaded.
+            """
+            thing = self.world.load_object(self._id)
+            assert thing is not None, "The thing in {0} is None! This shouldn't happen".format(self)
+            # Use object.__setattr__ to set self._thing because we overrode our own __setattr__
+            object.__setattr__(self, '_thing', thing)
+            # Add ourselves to the live set, this tells the World to consider us for unloading
+            self.world.live_set.add(self)
+            return thing
+
         def __setattr__(self, name, value):
-            if not hasattr(self, name):
+            if name not in self.__dict__:
                 if not self._thing:
-                    object.__setattr__(self, '_thing', self.world.load_object(self._id))
-                    self.world.live_set.add(self)
+                    self._load_thing()
+                # Update cache time and mark dirty, since object was touched
                 self.cachetime = int(time.time())
+                self._dirty = True
                 return setattr(self._thing, name, value)
             return object.__setattr__(self, name, value)
         
@@ -124,17 +145,35 @@ def ThingProxyFactory(_world):
             """
             return self._id
 
+        @property
+        def dirty(self):
+            """
+            Gets whether this Thing needs to be saved. Read-only.
+            """
+            return self._dirty
+        
+        def save(self):
+            """
+            Saves this Thing to the database, only if it has been changed since it was last loaded.
+            """
+            if self._dirty:
+                log(LogLevel.Trace, "ThingProxy#{0}: Saving dirty Thing".format(self._id))
+                self._thing.force_save()
+                self._dirty = False
+
         def unload(self):
             """
             Forces the Thing referred to by this ThingProxy to be unloaded.
             """
             if self._thing:
-                self._thing.save()
+                self.save()
                 self._thing = None
             # remove ourself from the live set
             self.world.live_set.discard(self)
-        
+
+        # End of ThingProxy class
     return ThingProxy
+    # End of ThingProxyFactory
 
 class World(object):
     """
@@ -148,7 +187,6 @@ class World(object):
         self.cache_task = task.LoopingCall(self.purge_cache)
         self.cache_task.start(300)
         self.ThingProxy = ThingProxyFactory(self)
-        pass
 
     def close(self):
         # Immediately purge (and save, if neccessary) all cached objects

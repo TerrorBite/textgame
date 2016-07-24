@@ -21,16 +21,10 @@ class Thing(object):
         # Keep a reference to the world instance
         self.world = world
 
-        # Validation checking
-        """Returns a value indicating whether or not this Thing needs to be saved to the database.
-
-        If this instance is "dirty", then it should be saved to the database by calling its save() method."""
-        self.dirty = False
-
         # Set basic params
         self._obj, self._dbtype = (obj, dbtype)
         self.name, self.flags, self.money = (name, flags, money)
-        self._created, self._modified, self._lastused = (created, modified, lastused)
+        self._created, self._modified, self._lastused = (created, modified, lastused) ###
 
         self._desc = world.db.get_property(obj, '_/desc')
 
@@ -39,7 +33,6 @@ class Thing(object):
         self.link = world.get_thing(link_id) if link_id else None
 
         log(LogLevel.Trace, 'A new Thing was instantiated with (ID:{0}) (name:{1}) (parentID:{2})'.format(self._obj, self.name, self.parent.id))
-        self.__setattr__ = self._setattr
 
     def __repr__(self):
         return "<{0}#{1} at 0x{2:08x}>".format(type(self).__name__, self._obj, id(self))
@@ -49,22 +42,9 @@ class Thing(object):
     #        # DB load messages
     #    return object.__getattr__(self, name)
 
-    def _setattr(self, name, value):
-        if name in (type(self).dbattrs + type(self).msgattrs):
-            self.modified = time.time()
-            self.dirty = True
-            log(LogLevel.Trace, "{0}#{1} marked dirty for writing {2}".format(self.name, self._obj, name))
-        object.__setattr__(self, name, value)
-
     def force_save(self):
         "Forces an immediate save of this Thing to the database."
         self.world.save_thing(self)
-        self.dirty = False
-
-    def save(self):
-        "Saves this object to the database, only if it has changed since it was loaded."
-        if self.dirty:
-            self.force_save()
 
     def __getitem__(self, key):
         return self.world.db.get_property(self._obj, key)
