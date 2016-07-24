@@ -297,3 +297,63 @@ ADDENDUM:
     @pay : Pay currency to a player or object
     @quit : Disconnects you
     @kick : Lets admins disconnect other players
+
+INTERSCRIPT
+
+Interscript is a simple substitution-based text processing language designed to be used within existing text strings. Here is an example string containing Interscript:
+
+    Hello, {[name:<me>]}! You're currently in {[name:[loc:<me>]]}. This text uses [name:<me>].
+
+This might resolve to the following string:
+
+    Hello, God! You're currently in The Universe. This text uses [name:<me>].
+
+Interscript is only parsed between curly braces. Specifically, the delimiters {[ ... ]} begin and end an Interscript block, but the square brackets form part of the script within.
+
+Interscript consists almost solely of nested functions that perform string processing. Function calls are made using the following syntax:
+
+    [function_name:arg1,arg2,arg3]
+
+This will call function_name with the arguments "arg1", "arg2" and "arg3".
+
+If a function takes no arguments, the colon delimiter is omitted. Consider the following:
+
+    [noargs]  - calls the noargs function with no arguments.
+    [onearg:] - calls the onearg function with the argument "" (empty string).
+
+In Interscript, all data is represented as strings. However, some functions operate on certain kinds of data, such as numbers, booleans, or database IDs.
+
+Integers: Strings are converted to integers the usual way. Examples: "123", "-7"
+Floats: Floating point numbers are not currently supported.
+Database IDs: A hash followed by a number, e.g. "#12345". An asterisk followed by a character name (e.g. "*God") will resolve to the database ID of that player object
+Booleans: The values "0" and "" (empty string) will evaluate as False, all other values are True. Functions that return booleans will return "1" for True and "0" for False.
+
+The following functions are currently defined. Function names are case-insensitive.
+
+    <me>
+        Contains the dbref of the player executing the Interscript.
+
+    <this>
+        Contains the dbref of the object that contains this Interscript.
+
+    <cmd>
+        Contains the name of the Action that triggered this Interscript to be parsed.
+
+    <arg>
+        Contains any text that follows the Action that triggered this Interscript.
+
+    [name:dbref]
+        Takes a dbref as argument. Returns the name of the object referred to.
+
+    [loc:dbref]
+        Takes a dbref as argument. Returns the dbref of the object's parent.
+
+    [null:str]
+        Takes any string. Returns the empty string. Used to suppress output.
+
+    [eval:str]
+        Takes any string. Evaluates any Interscript contained within the string and returns the result.
+
+    [owner:dbref]
+        Takes a dbref. Returns the dbref of the object that owns the provided object.
+
