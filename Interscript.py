@@ -26,7 +26,16 @@ class Parser(object):
         self.action = action
         self.arg = arg
 
-        return re_interscript.sub( lambda match: self._parse(match.group(1))[0], thing[propname])
+        def repl(match):
+            result, more = self._parse(match.group(1))
+            while more:
+                pos = more.find('[')
+                result += more[:pos]
+                val, more = self._parse(more[pos:])
+                result += val
+            return result
+
+        return re_interscript.sub( repl, thing[propname])
 
     def _parse(self, text):
         """
@@ -66,13 +75,15 @@ class Parser(object):
                 
     def _parse_var(self, text):
         """
-        Like _parse, but handles variables.
+        Like _parse(), but handles variables.
         """
         s = text.find('>')
         var = text[1:s]
-        remain = text[s+1:]
 
-        return "(Value of {0}){1}".format(var, remain), s+1
+        # TODO: Replace with actual value
+        result = "(Value of {0})".format(var)
+
+        return result, text[s+1:]
 
             
             
