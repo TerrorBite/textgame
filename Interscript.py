@@ -30,13 +30,11 @@ class Parser(object):
 
     def _parse(self, text):
         """
-        Searches the provided string for the first instance of either a [ or a ].
-        Upon finding a [, it splits the string just before it and calls parse() on the second half.
-        Upon finding a ], it processes the contents, then returns.
-
-        The return value is a tuple:
-            0: The replacement string and remaining unparsed text.
-            1: The position in the original string where parsing should be resumed.
+        Searches the provided string from the second character onwards for the first instance of either a [ or a ]. It assumes that the first character is a [ and is searching for the corresponding ] character.
+        Upon finding a [, it calls itself on the string from that character onwards. When that returns, it replaces the search string from that point on with the returned values, and then resumes parsing from the replacement onwards.
+        Upon finding a ], it stops searching, then parses and executes the function that was contained in the brackets. It then returns a tuple consisting of two parts:
+        The first part contains the replacement value for the string up to and including the ]. The second part contains any unparsed text that still remains beyond that position.
+        
         """
 
         char = ''
@@ -48,22 +46,23 @@ class Parser(object):
 
             s = pos+m.start()
             if char == '[':
-                repl, ln = self._parse( text[s:] )
-                text = text[:s] + repl
-                pos = s+ln
+                repl, more = self._parse( text[s:] )
+                text = text[:s] + repl + more
+                pos = s+len(repl)
                 continue
             if char == '<':
                 # like [, but vars
-                repl, ln = self._parse_var( text[s:] )
-                text = text[:s] + repl
-                pos = s+ln
+                repl, more = self._parse_var( text[s:] )
+                text = text[:s] + repl + more
+                pos = s+len(repl)
                 continue
             if char == ']':
                 # we have hit the end of the function. Now we execute it
                 func = text[1:s]
                 print "Executing func: ", func
+                result = "(Result of {0})".format(func) #TODO: Actually call func
 
-                return "(Result of {0}){1}".format(func, text[s+1:]), s+1
+                return result, text[s+1:]
                 
     def _parse_var(self, text):
         """
