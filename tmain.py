@@ -25,6 +25,11 @@ def main():
     log(LogLevel.Notice, 'Now listening for connections.')
     log(LogLevel.Debug, 'Launching reactor.run() main loop')
 
+    def onShutdown():
+        log(LogLevel.Notice, "Shutting down...")
+        world.close()
+
+    reactor.addSystemEventTrigger('before', 'shutdown', onShutdown)
     reactor.run()
 
 if __name__ == '__main__': main()

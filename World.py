@@ -151,6 +151,8 @@ class World(object):
         pass
 
     def close(self):
+        # Immediately purge (and save, if neccessary) all cached objects
+        self.purge_cache(-1)
         self.db.close()
     
     def connect(self, username, password=None):

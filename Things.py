@@ -155,6 +155,7 @@ class Player(Thing):
         # TODO: Execute actions
         #actions = filter(lambda x: x.type is Action, self.parent.contents + self.contents)
         actions = [x for x in self.parent.contents + self.contents if x.type is Action]
+        #TODO: Search order
         log(LogLevel.Trace, "Found actions: {0}".format(repr(actions)))
         if exit.startswith('#'):
             actions = [x for x in actions if exit[1:] == x.id()]
@@ -164,6 +165,27 @@ class Player(Thing):
             #actions = filter(lambda x: x.name.lower().startswith(exit.lower()), actions)
         if not actions: return "You can't go that way."
         elif len(actions) > 1: return "I don't know which one you mean!"
+
+    def find(self, name, types=None):
+        """
+        Searches for nearby things by name.
+        
+        Searches the room the player is in, and the player's inventory for the named object.
+        Also resolves keywords such as "me" and "here" to the respective objects.
+
+        Search order: Keyword, inventory, location.
+        """
+        if name.lower == 'me' and (types is None or Player in types):
+            return self
+        if name.lower == 'here' and (types is None or Room in types):
+            return self.parent
+        inv = dict([(x.name, x) for x in self.contents if (types is None or x.type in types)])
+        if name in inv:
+            return inv[name]
+        nearby = dict([(x.name, x) for x in self.parent.contents if (types is None or x.type in types)])
+        if name in nearby:
+            return nearby[name]
+        return None
 
 
 class Room(Thing):

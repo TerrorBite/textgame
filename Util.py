@@ -121,7 +121,7 @@ def setLogLevel(level):
 import sys
 def log(level, message):
     if level < loglevel:
-        print level, loglevel
+        #print level, loglevel
         return
     if loglevel <= LogLevel.Debug:
         frm = inspect.stack()[1]

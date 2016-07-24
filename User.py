@@ -154,6 +154,19 @@ class User(object):
         self.send_message("Nobody else is connected.")
         return
 
+    @commandHandler('@name')
+    def cmd_name(self, params):
+        if len(params) == 0:
+            return
+        param = ' '.join(params)
+        if '=' not in param: return
+        target, name = param.split('=', 1)
+        target = self.player.find(target)
+        if target is None:
+            self.send_message("Can't find that.")
+            return
+        target.name = name
+
     @commandHandler('@connect', 'connect', prelogin=True)
     @commandHelpText("Connects you to one of your characters.")
     def cmd_connect(self, params):
