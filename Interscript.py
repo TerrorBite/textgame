@@ -9,6 +9,17 @@ re_interscript = re.compile(ur'{(\[.*?[^\\]\])}')
 re_special = re.compile(ur'[][<]')
 re_unescape = re.compile(ur'\\([][<>{}\\])')
 
+funchandlers = {}
+class funcHandler:
+    """
+    Decorator that marks a method as a command handler.
+    """
+    def __init__(self, *aliases):
+        self.funcs = aliases
+    def __call__(self, f):
+        for func in self.funcs:
+            funchandlers[func] = f
+
 class Parser(object):
     
     def __init__(self, player):
@@ -69,7 +80,8 @@ class Parser(object):
                 # we have hit the end of the function. Now we execute it
                 func = text[1:s]
                 print "Executing func: ", func
-                result = "(Result of {0})".format(func) #TODO: Actually call func
+                
+                result = _execute(func)
 
                 return result, text[s+1:]
                 
@@ -85,8 +97,17 @@ class Parser(object):
 
         return result, text[s+1:]
 
-            
-            
-        
+    def _execute(self, func):
+        #TODO: Func
+        return func
+
+    @funcHandler('null')
+    def func_null(self, *params):
+        return ''
+
+    @funcHandler('name')
+    def func_name(self, dbref):
+        if dbref.startswith('#'):
+            dbref = int(dbref[1:])
 
         
