@@ -20,6 +20,28 @@ class funcHandler:
         for func in self.funcs:
             funchandlers[func] = f
 
+class ResolvableText(object):
+    """
+    Class that represents a string of text which may contain callables which need to be resolved to text.
+    """
+    def __init__(self):
+        self.parts = []
+    def add(self, part):
+        self.parts.append(part)
+    def resolve(self):
+        return ''.join([x() if callable(x) else x for x in self.parts])
+
+def wrapFunc(func, *params):
+    """
+    Wraps a function, taking a set of parameters.
+    When called, the wrapper will call the original function with those parameters.
+    The wrapper does not take any parameters itself. It returns what the wrapped function returns.
+    """
+    def wrapper():
+        func(*params)
+    return wrapper
+
+
 class Parser(object):
     
     def __init__(self, player):
@@ -30,7 +52,7 @@ class Parser(object):
 
     def parse(self, thing, propname, action, arg):
         """
-        Parses a property of a thing.
+        Parses a property of a Thing.
         """
         self.thing = thing
         self.propname = propname
@@ -99,6 +121,11 @@ class Parser(object):
 
     def _execute(self, func):
         #TODO: Func
+        if ':' in func:
+            fname, params = func.split(':',1)
+            #TODO: param value escaping?
+            params = params.split(',')
+        else: fname = func
         return func
 
     @funcHandler('null')
