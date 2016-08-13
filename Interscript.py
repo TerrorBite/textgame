@@ -8,6 +8,7 @@ re_interscript = re.compile(ur'{(\[.*?[^\\]\])}')
 
 re_special = re.compile(ur'[][<]')
 re_unescape = re.compile(ur'\\([][<>{}\\])')
+re_funcname = re.compile(ur'\[(\w+)([]:])')
 
 funchandlers = {}
 class funcHandler:
@@ -31,9 +32,9 @@ class ResolvableText(object):
     def resolve(self):
         return ''.join([x() if callable(x) else x for x in self.parts])
 
-def wrapFunc(func, *params):
+def wrap_func(func, params):
     """
-    Wraps a function, taking a set of parameters.
+    Wraps a function, taking a sequence of parameters. Returns the wrapper.
     When called, the wrapper will call the original function with those parameters.
     The wrapper does not take any parameters itself. It returns what the wrapped function returns.
     """
@@ -50,14 +51,21 @@ class Parser(object):
         """
         self.player = player
 
-    def parse(self, thing, propname, action, arg):
+    def parse_prop(self, thing, propname, action, arg):
         """
-        Parses a property of a Thing.
+        Parses a property of a Thing in the context of this player.
         """
         self.thing = thing
         self.propname = propname
         self.action = action
         self.arg = arg
+
+        self.parse(thing[propname])
+
+    def parse(self, string):
+        """
+        Parses an arbitrary string for Interscript.
+        """
 
         def repl(match):
             result, more = self._parse(match.group(1))
@@ -107,6 +115,40 @@ class Parser(object):
 
                 return result, text[s+1:]
                 
+    def _parse_func(self, source):
+        """
+        Parses a function.
+        Returns (callable, length_consumed).
+        """
+        assert source[0] == '['
+
+        m = re_funcname.match(source)
+        funcname = m.group(1)
+        consumed = m.end()
+
+        params = []
+        if m.group(2) == ':':
+            # account for closing ]
+            params, l = _parse_params(source[consumed:])
+            l += 1
+            
+
+        if funcname not in funchandlers:
+            raise Exception("Unknown function")
+
+        func = funchandlers[funcname]
+        func = wrap_func(func, params)
+        return func, consumed
+
+    def _parse_params(self, source):
+        """
+        Parses function parameters.
+        Returns (ResolvableText, length_consumed).
+        """
+
+        return text.split(','), consumed
+        pass
+        
     def _parse_var(self, text):
         """
         Like _parse(), but handles variables.
