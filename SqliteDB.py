@@ -26,13 +26,18 @@ class Cursor(object):
         self.cursor.close()
 
 class SqliteDatabase(Database.Database):
+    """
+    This is an implementation of the Database class that uses Sqlite as the database backend.
+    """
     
     def __init__(self):
-        # Sanity check sqlite version 3.7.0 or greater
+        # Sanity check sqlite version 3.6.19 or greater
         v = sqlite3.sqlite_version_info
-        if(v[0] < 3 or (v[0] == 3 and v[1] < 7)):
-            log(LogLevel.Fatal, "This software requires at least Sqlite version 3.7.0!")
-            exit(1)
+        if(v[0] < 3 or (v[0] == 3 and (v[1] < 6 or v[1] == 6 and v[2] < 19) ) ):
+            log(LogLevel.Warn, "Sqlite backend needs a newer version of Sqlite.")
+            log(LogLevel.Warn, "You have: Sqlite {0[0]}.{0[1]}.{0[2]}".format(v))
+            log(LogLevel.Warn, "You need: Sqlite 3.6.19 or later")
+            log(LogLevel.Warn, "Continuing anyway, but foreign key constraints will not work.")
 
         log(LogLevel.Info, "Opening sqlite database connection.")
 
@@ -41,18 +46,18 @@ class SqliteDatabase(Database.Database):
         c = self.conn.cursor()
         c.execute('PRAGMA foreign_keys = ON')
         
-        self.db_create_schema(c)
+        self._db_create_schema(c)
         c.close()
         self.conn.commit()
     
     def _cursor(self):
         return Cursor(self.conn.cursor())
 
-    def db_close(self):
+    def _db_close(self):
         self.conn.commit()
         self.conn.close()
 
-    def db_create_schema(self, cursor=None):
+    def _db_create_schema(self, cursor=None):
         """
         Create tables as required.
         """
@@ -237,7 +242,7 @@ class SqliteDatabase(Database.Database):
         if not cursor: c.close()
     # end create_schema()
 
-    def db_save_object(self, thing):
+    def _db_save_object(self, thing):
         """
         Save an object to the database.
         """
@@ -248,7 +253,7 @@ class SqliteDatabase(Database.Database):
             #c.execute("""UPDATE messages SET succ=?, fail=?, osucc=?, ofail=?, 'drop'=? WHERE obj==?""",
             #        (thing.desc, thing.succ, thing.fail, thing.osucc, thing.ofail, thing.drop, thing.id))
 
-    def db_load_object(self, obj):
+    def _db_load_object(self, obj):
         """
         Load object out of the database.
         """
@@ -256,7 +261,7 @@ class SqliteDatabase(Database.Database):
             c.execute("""SELECT name, type, flags, parent, owner, link, money, created, modified, lastused FROM objects WHERE id==?""", (obj,))
             return c.fetchone()
 
-    def db_get_contents(self, obj):
+    def _db_get_contents(self, obj):
         """
         Returns a list of database IDs of objects contained by this object.
         """
@@ -264,17 +269,17 @@ class SqliteDatabase(Database.Database):
             c.execute("""SELECT id FROM objects WHERE parent==?""", (obj,))
             return tuple(map(lambda x:x[0], c.fetchall()))
 
-    def db_get_property(self, obj, key):
+    def _db_get_property(self, obj, key):
         with Cursor(self) as c:
             c.execute("""SELECT value FROM props WHERE obj==? AND key==?""", (obj, key))
             result = c.fetchone()
             return result[0] if result else None
 
-    def db_set_property(self, obj, key, value):
+    def _db_set_property(self, obj, key, value):
         with Cursor(self) as c:
             c.execute("""INSERT OR REPLACE INTO props VALUES (?, ?, ?)""", (obj, key, value))
 
-    def db_get_user(self, username):
+    def _db_get_user(self, username):
         with Cursor(self) as c:
             c.execute("SELECT password, salt, obj FROM users WHERE username == ?", (username,))
             return c.fetchone()
