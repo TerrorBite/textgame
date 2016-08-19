@@ -126,5 +126,27 @@ def log(level, message):
     if loglevel <= LogLevel.Debug:
         frm = inspect.stack()[1]
         mod = inspect.getmodule(frm[0])
-        sys.stdout.write("{0} [{1}/{3}] {2}\r\n".format(time.strftime('[%H:%M:%S]'), level.name().upper(), message, mod.__name__) )
-    else: sys.stdout.write("{0} [{1}] {2}\r\n".format(time.strftime('[%H:%M:%S]'), level.name().upper(), message) )
+        sys.stdout.write("{0} [{1}/{3}] {2}\r\n".format(time.strftime('[%H:%M:%S]'),
+            level.name().upper(), message, mod.__name__) )
+    else:
+        sys.stdout.write("{0} [{1}] {2}\r\n".format(time.strftime('[%H:%M:%S]'),
+            level.name().upper(), message) )
+
+def pip_install(*packages):
+    try:
+        import pip
+    except ImportError as e:
+        loglevel.Error("pip is not installed")
+        return False
+
+    if pip.util.ask("The following packages are required:\r\n    {0}\r\n"\
+            "Do you want to install them now using pip? (yes/no): "
+            .format(', '.join(packages)) , ['yes', 'no']) == 'no': return False
+
+    try:
+        result = pip.main(['install']+packages)
+    except SystemExit as exit:
+        # pip tried to abort
+        return False
+    return result==0
+
