@@ -104,7 +104,7 @@ def ThingProxyFactory(_world):
             """
             Called when the underlying Thing needs to be loaded.
             """
-            thing = self.world.load_object(self._id)
+            thing = self.world.db.load_object(self.world, self._id)
             assert thing is not None, "The thing in {0} is None! This shouldn't happen".format(self)
             # Use object.__setattr__ to set self._thing because we overrode our own __setattr__
             object.__setattr__(self, '_thing', thing)
@@ -216,9 +216,6 @@ class World(object):
         else:
             log(LogLevel.Trace, "Cache: Hit #{0}".format(obj))
             return self.cache[obj]
-
-    def load_object(self, obj):
-        return self.db.load_object(self, obj)
 
     def purge_cache(self, expiry=3600):
         "Remove all cached objects older than the given time."
