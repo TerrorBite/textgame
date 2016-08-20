@@ -2,6 +2,7 @@ from Util import log, LogLevel
 import time
 
 class NotLoaded:
+    # Unique value to represent "not loaded"
     pass
 
 class Thing(object):
@@ -13,8 +14,7 @@ class Thing(object):
 
     # Basic properties
 
-    def __init__(self, world, obj,
-            name, dbtype, flags,
+    def __init__(self, world, obj, name, flags,
             parent_id, owner_id, link_id, money,
             created, modified, lastused):
 
@@ -22,8 +22,7 @@ class Thing(object):
         self.world = world
 
         # Set basic params
-        self._obj, self._dbtype = (obj, dbtype)
-        self.name, self.flags, self.money = (name, flags, money)
+        self._obj, self.name, self.flags, self.money = (obj, name, flags, money)
         self._created, self._modified, self._lastused = (created, modified, lastused) ###
 
         self._desc = world.db.get_property(obj, '_/desc')
@@ -60,7 +59,9 @@ class Thing(object):
     @property
     def dbtype(self):
         "Gets the database type of this Thing. Read-only."
-        return self._dbtype
+        # It's expected that the Database module has loaded, and set the class value appropriately
+        # Otherwise, let the attribute error propagate naturally
+        return self.__class__.dbtype
 
     @property
     def type(self):

@@ -8,15 +8,19 @@ import hashlib, struct, random, time
 from Things import *
 from Util import enum, log, LogLevel
 
-DBType = enum('Room', 'Player', 'Item', 'Action', 'Script')
+# This is the master list of Thing types as used in the database.
+# DO NOT CHANGE THE ORDER OF THIS LIST as it will break existing databases.
+thingtypes = [Room, Player, Item, Action, Script]
 
-typemap = {
-        DBType.Room: Room,
-        DBType.Player: Player,
-        DBType.Item: Item,
-        DBType.Action: Action,
-        DBType.Script: Script
-        }
+# Generate enum from the above list
+DBType = enum(*[t.__name__ for t in thingtypes])
+
+# Attach dbtype to classes
+for t in thingtypes:
+    t.dbtype = DBType[t.__name__]
+
+def Thing_of_type(dbtype):
+    return thingtypes[dbtype.value()]
 
 active = True
 
@@ -95,13 +99,14 @@ class Database(object):
         if not active: raise DatabaseNotConnected()
 
         result = self._db_load_object(obj)
-        obtype = DBType(result[1])
+        try:
+            obtype = DBType(result[1])
+        except IndexError as e:
+            raise ValueError("Unknown DBType {0} while loading #{1} from the database!".format(result[1], obj))
+
         log(LogLevel.Debug, "We loaded {1}#{0} (type={2}) out of the database!".format(result[0], obj, obtype))
 
-        if obtype in typemap:
-            newobj = typemap[obtype](world, obj, *result)
-        else:
-            raise ValueError("Unknown DBType {0} while loading #{1} from the database!".format(result[1], obj))
+        newobj = Thing_of_type(obtype)(world, obj, *result)
 
         log(LogLevel.Debug, "Database.load_object(): Returning {0}".format(repr(newobj)))
         return newobj
@@ -130,9 +135,23 @@ class Database(object):
         if result is None: return (None, None, None, None, None)
         return result
 
-    def get_new_id(self):
+    def new_object(self, objtype, owner, parent):
+        """
+        Initializes a new database object, returning the database ID of the object.
+
+        Required parameters:
+        objtype: the type of object to create. This should be a Thing class type.
+        owner: The Thing that will own this new object.
+        parent: The Thing that will contain this new object.
+
+        This will reuse a deleted object's ID if one is available, thereby permanently
+        destroying the deleted object.
+        """
         # TODO: Implement creation of new objects in the database
-        pass
+        newid = self._db_get_available_id()
+        if newid is None:
+            newid = self._db_create_new_object()
+        thing = 
     
     ### Abstract Methods ###
     # The following methods need to be overridden in derived classes.
@@ -226,6 +245,19 @@ class Database(object):
 
         In database terms, this is usually the result of the following SQL query (or equivalent):
             SELECT id FROM objects WHERE parent==$obj;
+        """
+        pass
+
+    @abstractmethod
+    def _db_get_available_id(self):
+        """
+        Abstract method.
+
+        This method should fetch the lowest available recycled database ID (i.e. the ID of an
+        object that has been deleted such that its ID is available for reuse).
+
+        If there are no such IDs available, then this method should return None, signalling that
+        there are no "holes" to be filled in the database, and a fresh ID should be used instead.
         """
         pass
 

@@ -247,9 +247,10 @@ class SqliteDatabase(Database.Database):
         Save an object to the database.
         """
         with Cursor(self) as c:
-            c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, money=?, modified=?, lastused=?, desc=? WHERE id==?""",
+            # Note: Will fail if the row being updated does not match the dbtype of the Thing provided.
+            c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, money=?, modified=?, lastused=?, desc=? WHERE id==? AND type==?""",
                     (thing.parent.id, thing.owner.id, thing.name, thing.flags, thing.link.id if thing.link else None,
-                        thing.money, thing.modified, thing.lastused, thing.desc, thing.id))
+                        thing.money, thing.modified, thing.lastused, thing.desc, thing.id, int(thing.dbtype)))
             #c.execute("""UPDATE messages SET succ=?, fail=?, osucc=?, ofail=?, 'drop'=? WHERE obj==?""",
             #        (thing.desc, thing.succ, thing.fail, thing.osucc, thing.ofail, thing.drop, thing.id))
 
@@ -270,17 +271,37 @@ class SqliteDatabase(Database.Database):
             return tuple(map(lambda x:x[0], c.fetchall()))
 
     def _db_get_property(self, obj, key):
+        """
+        Fetches a property of an object.
+        """
         with Cursor(self) as c:
             c.execute("""SELECT value FROM props WHERE obj==? AND key==?""", (obj, key))
             result = c.fetchone()
             return result[0] if result else None
 
     def _db_set_property(self, obj, key, value):
+        """
+        Writes a property of an object.
+        """
         with Cursor(self) as c:
             c.execute("""INSERT OR REPLACE INTO props VALUES (?, ?, ?)""", (obj, key, value))
 
     def _db_get_user(self, username):
+        """
+        Fetches user account info from the database.
+        """
+        #TODO: Upgrade to multiple characters per account
         with Cursor(self) as c:
             c.execute("SELECT password, salt, obj FROM users WHERE username == ?", (username,))
             return c.fetchone()
+
+    def _db_get_available_id(self):
+        with Cursor(self) as c:
+            c.execute("SELECT obj FROM deleted ORDER BY obj ASC LIMIT 1")
+            result = c.fetchone()
+            return result[0] if result else None # TODO
+
+    def _db_create_new_object(self, dbtype, name, parent, owner):
+        with Cursor(self) as c:
+            c.execute("""INSERT INTO objects VALUES ("""
 
