@@ -241,7 +241,11 @@ class World(object):
             raise TypeError("Expected a Thing as argument")
 
     def save_thing(self, thing):
+        # Save Thing basic info
         self.db.save_object(thing)
+        # Save any modified properties of the Thing
+        for prop in thing._propdirty:
+            self.db.set_property(thing.id, prop, thing._propcache[prop])
 
     def find_user(self, name):
         """

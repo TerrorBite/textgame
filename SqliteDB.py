@@ -71,11 +71,15 @@ class SqliteDatabase(Database.Database):
 
         # The "meta" table is a simple key-value table that stores metadata about the database.
         if 'meta' not in tables:
-            c.execute("""-- Stores metadata about the database, such as schema version number.
-                    CREATE TABLE IF NOT EXISTS meta (
-                    key TEXT PRIMARY KEY ASC,
-                    value NONE
-                    )""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS meta (
+    -- Stores metadata about the database, such as schema version number.
+    -- This data is stored as simple key-value pairs.
+
+    key TEXT PRIMARY KEY ASC,   -- Key name
+    value NONE                  -- Value, can be any type
+)
+                    """)
             c.execute("""INSERT INTO meta VALUES ('schema_version', 0)""")
             log(LogLevel.Info, '- Created meta table.')
 
@@ -83,47 +87,51 @@ class SqliteDatabase(Database.Database):
         # Extended data is stored in a separate table. This is done in order to
         # make it faster to do basic queries about an object.
         if 'objects' not in tables:
-            c.execute("""-- This table stores basic data about an object.
-                    -- Extended data is stored in other tables, or as properties.
-                    -- This should make it faster to perform basic queries on an object.
-                    CREATE TABLE IF NOT EXISTS objects (
-                    id INTEGER PRIMARY KEY ASC,     -- Primary database ID of this object (alias to built in rowid column)
-                    name TEXT NOT NULL,             -- Name of the object
-                    type INTEGER NOT NULL,          -- Type of the object (Room=0, Player=1, Item=2, Action=3, Script=4)
-                    flags INTEGER NOT NULL,         -- Object flags
-                    parent INTEGER NOT NULL,        -- Parent (location) of this object
-                    owner INTEGER NOT NULL,         -- Owner of this object
-                    link INTEGER,                   -- Link to another object (home, or action)
-                    money INTEGER,                  -- Amount of currency that this object contains
-                    created INTEGER,                -- Timestamp object was created (seconds since unix epoch)
-                    modified INTEGER,               -- When the object was last modified in any way
-                    lastused INTEGER,               -- When the object was last used (without modifying it)
-                    desc TEXT,                      -- Object description
-                    FOREIGN KEY(parent) REFERENCES objects(id), -- replaces "inventory" table
-                    FOREIGN KEY(owner) REFERENCES objects(id),
-                    FOREIGN KEY(link) REFERENCES objects(id),
-                    CHECK( type >= 0 AND type <= 4 )
-                    )""")
-            log(LogLevel.Info, '- Created objects table.')
-            c.execute("""CREATE INDEX IF NOT EXISTS parent_index ON objects(parent)""")
-            c.execute("""CREATE INDEX IF NOT EXISTS owner_index ON objects(owner)""")
-            c.execute("""CREATE INDEX IF NOT EXISTS link_index ON objects(link)""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS objects (
+    -- This table stores basic data about an object.
+    -- Extended data is stored in other tables, or as properties.
+    -- This should make it faster to perform basic queries on an object.
 
-            # Create Room #0 (Universe) and Player #1 (God)
+    id INTEGER PRIMARY KEY ASC,     -- Primary database ID of this object (alias to built in rowid column)
+    name TEXT NOT NULL,             -- Name of the object
+    type INTEGER NOT NULL,          -- Type of the object (Room=0, Player=1, Item=2, Action=3, Script=4)
+    flags INTEGER NOT NULL,         -- Object flags
+    parent INTEGER NOT NULL,        -- Parent (location) of this object
+    owner INTEGER NOT NULL,         -- Owner of this object
+    link INTEGER,                   -- Link to another object (home, or action)
+    money INTEGER,                  -- Amount of currency that this object contains
+    created INTEGER,                -- Timestamp object was created (seconds since unix epoch)
+    modified INTEGER,               -- When the object was last modified in any way
+    lastused INTEGER,               -- When the object was last used (without modifying it)
+    desc TEXT,                      -- Object description - this field is deprecated
+
+    FOREIGN KEY(parent) REFERENCES objects(id),
+    FOREIGN KEY(owner) REFERENCES objects(id),
+    FOREIGN KEY(link) REFERENCES objects(id),
+
+    -- Enforce the four possible types of object.
+    CHECK( type >= 0 AND type <= 4 )
+)
+                    """)
+            log(LogLevel.Info, '- Created objects table.')
+            c.execute("""CREATE INDEX IF NOT EXISTS parent_index ON objects(parent)
+    -- Contents of an object is determined by finding all objects whose parent is the container.""")
+            c.execute("""CREATE INDEX IF NOT EXISTS owner_index ON objects(owner)
+    -- Allow looking up or filtering objects by owner.""")
+            c.execute("""CREATE INDEX IF NOT EXISTS link_index ON objects(link)
+    -- Allow looking up or filtering objects by link - is this needed?""")
+
+            # Create Room #0 (Universe) and Player #1 (Creator)
             # Initially create "The Universe" as owning itself, due to constraints
-            #t = [(0, 0, 0, 'The Universe', 0, 0, None, "The Universe is a mysterious place that contains all other things."),
-            #     (1, 0, 1, 'God', 1, 0, 0, None),
-            #     # Other test objects
-            #     (2, 1, 1, 'no tea', 2, 0, 1, None),
-            #     (3, 0, 1, 'west', 3, 0, 0, "You gaze off to the west, if that is in fact west... it's hard to tell when you're in space.")]
             now = time.time()
 
-            #     id  name           t  f  p  o  link  m  cre. mod. used
-            t = [(0, 'The Universe', 0, 0, 0, 0, None, 0, now, now, now, "The Universe contains all other things."),
-                 (1, 'God',          1, 0, 0, 1, None, 0, now, now, now, "What you see cannot be described."),
+            #     id  name           typ flg par own link  $  cre. mod. used desc
+            t = [(0, 'The Universe',  0,  0,  0,  0, None, 0, now, now, now, None), # desc fields here are now deprecated
+                 (1, 'The Creator',   1,  0,  0,  1, None, 0, now, now, now, None),
                  # Other test objects
-                 (2, 'no tea',       2, 0, 1, 1, 1,    0, now, now, now, None),
-                 (3, 'west',         3, 0, 0, 1, 0,    0, now, now, now, "You look to the west.")]
+                 (2, 'no tea',        2,  0,  1,  1,  1,   0, now, now, now, None),
+                 (3, 'west',          3,  0,  0,  1,  0,   0, now, now, now, None)]
 
             c.executemany("""INSERT INTO objects VALUES(?,?, ?,?,?,?,?, ?, ?,?,?, ?)""", t)
             # Set Room #0's owner as God
@@ -132,15 +140,21 @@ class SqliteDatabase(Database.Database):
 
         # Create users table if it does not exist
         if 'users' not in tables:
-            c.execute("""-- Stores login information about user accounts.
-                    CREATE TABLE IF NOT EXISTS users (
-                    username TEXT, -- Username
-                    password TEXT, -- Password hash
-                    salt TEXT,     -- Salt used in hash
-                    email TEXT,    -- Email address
-                    obj INTEGER,   -- Character reference (TODO: Multiple characters)
-                    FOREIGN KEY(obj) REFERENCES objects(id)
-                    )""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    -- Stores login information about user accounts.
+
+    username TEXT PRIMARY KEY,  -- Username (is primary key)
+    password TEXT,              -- Password hash (hexadecimal)
+    salt TEXT,                  -- Salt used in hash (hexadecimal)
+    email TEXT,                 -- Email address
+    obj INTEGER,                -- Character reference
+    -- Note: In future, the "obj" field will be removed and a separate table
+    -- created which allows each account to have multiple characters associated.
+
+    FOREIGN KEY(obj) REFERENCES objects(id)
+)
+                    """)
 
             log(LogLevel.Info, '- Created users table.')
             # Create admin user
@@ -171,21 +185,35 @@ class SqliteDatabase(Database.Database):
 
         # Table for storing arbitrary 'properties' about an object.
         if 'props' not in tables:
-            c.execute("""-- Stores arbitrary properties about an object.
-                    -- This is essentially a set of key/value pairs associated with an object.
-                    -- Each row holds a single key/value pair.
-                    -- At a database level, key names are arbitrary, but the server uses a
-                    -- directory structure maintained using a naming convention for the keys.
-                    CREATE TABLE IF NOT EXISTS props (
-                    obj INTEGER,        -- ID of object
-                    key TEXT,           -- Name of this property
-                    value TEXT,         -- Value of this property
-                    FOREIGN KEY(obj) REFERENCES objects(id)
-                    )""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS props (
+    -- Stores arbitrary properties about an object.
+    -- This is essentially a set of key/value pairs associated with an object.
+    -- Each row holds a single key/value pair.
+    -- At a database level, key names are arbitrary, but the server uses a
+    -- directory structure maintained using a naming convention for the keys.
+
+    obj INTEGER,        -- ID of object
+    key TEXT,           -- Name of this property
+    value TEXT,         -- Value of this property
+
+    FOREIGN KEY(obj) REFERENCES objects(id)
+)
+                    """)
             # Index by id and key, unique index to ensure an id-key pairing cannot exist twice.
-            # This is important to allow our INSERT OR REPLACE statement to work.
-            c.execute("""CREATE UNIQUE INDEX IF NOT EXISTS key_index ON props(obj, key)""")
-            t=[ (0, '_/desc', "The Universe contains all other things."),
+            c.execute("""
+CREATE UNIQUE INDEX IF NOT EXISTS key_index ON props(
+    obj, key -- Properties are uniquely indexed by id-key pairing.
+    -- This constraint ensures that an object cannot have the same key twice,
+    -- which ensures our INSERT OR REPLACE statement will work correctly.
+)
+                    """)
+
+            # Assign sample property values to our starting objects.
+            t=[ (0, '_/desc', "You can't hear anything, see anything, smell anything, feel anything, or taste anything, and you do not even know where you are or who you are or how you got here."),
+                (1, '_/desc', "The being that you see cannot be described."),
+                (2, '_/desc', "You really wish you had a cup of tea right about now."),
+                (3, '_/desc', "There's nothing exciting in that direction."),
                 (3, '_/succ', "Life is peaceful there..."),
                 (3, '_/fail', "The way is closed.")]
             c.executemany("""INSERT INTO props VALUES (?, ?, ?)""", t)
@@ -201,42 +229,62 @@ class SqliteDatabase(Database.Database):
         # with those of the new object, and the old object is lost forever.
         # This system allows IDs to be reused and doesn't leave "holes" in the database.
         if 'deleted' not in tables:
-            c.execute("""-- This simple table allows objects to be marked as deleted.
-                    -- This allows ID values to be reused.
-                    -- It also potentially allows recycled objects to be recovered.
-                    CREATE TABLE IF NOT EXISTS deleted (obj INTEGER, FOREIGN KEY(obj) REFERENCES object(id))""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS deleted (
+    -- This single-column table allows objects to be marked as deleted.
+    -- This allows ID values to be reused.
+    -- It also potentially allows recycled objects to be recovered.
+
+    obj INTEGER, -- The ID of a deleted object
+
+    FOREIGN KEY(obj) REFERENCES object(id)
+)
+                    """)
             log(LogLevel.Info, '- Created deleted IDs table.')
 
         # Many-to-many table for locks
         if 'locks' not in tables:
-            c.execute("""-- This many-to-many table contains basic locks for objects.
-                    CREATE TABLE IF NOT EXISTS locks (
-                    obj INTEGER,
-                    lock INTEGER,
-                    FOREIGN KEY(obj) REFERENCES objects(id),
-                    FOREIGN KEY(lock) REFERENCES objects(id)
-                    )""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS locks (
+    -- This many-to-many table contains basic locks for objects.
+
+    obj INTEGER,  -- ID of the object.
+    lock INTEGER, -- ID of an object that has a lock on this object.
+
+    FOREIGN KEY(obj) REFERENCES objects(id),
+    FOREIGN KEY(lock) REFERENCES objects(id)
+)
+                    """)
             log(LogLevel.Info, '- Created locks table.')
 
         # Many-to-many table for access control list entries
         if 'acl' not in tables:
-            c.execute("""-- This many-to-many table contains Access Control List entries.
-                    CREATE TABLE IF NOT EXISTS acl (
-                    obj INTEGER,
-                    player INTEGER,
-                    flags INTEGER,
-                    FOREIGN KEY(obj) REFERENCES objects(id),
-                    FOREIGN KEY(player) REFERENCES objects(id)
-                    )""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS acl (
+    -- This many-to-many table contains Access Control List entries.
+
+    obj INTEGER,     -- ID of the object to which access is being controlled.
+    player INTEGER,  -- ID of a player object which has some degree of access.
+    flags INTEGER,   -- Flags which describe what degree of access is allowed.
+
+    FOREIGN KEY(obj) REFERENCES objects(id),
+    FOREIGN KEY(player) REFERENCES objects(id)
+)
+                    """)
             log(LogLevel.Info, '- Created acl table.')
 
         if 'scripts' not in tables:
-            c.execute("""-- This table stores the executable content of scripts.
-                    CREATE TABLE IF NOT EXISTS scripts (
-                    obj INTEGER,                  -- ID of object
-                    script TEXT,
-                    FOREIGN KEY(obj) REFERENCES objects(id)
-                    )""")
+            c.execute("""
+CREATE TABLE IF NOT EXISTS scripts (
+    -- This table stores the executable content of scripts.
+
+    obj INTEGER,    -- ID of script object
+    type INTEGER,   -- Type of script (0=lua)
+    script TEXT,    -- Script content
+
+    FOREIGN KEY(obj) REFERENCES objects(id)
+)
+                    """)
             log(LogLevel.Info, '- Created scripts table.')
 
         if not cursor: c.close()
@@ -244,8 +292,9 @@ class SqliteDatabase(Database.Database):
 
     def _db_save_object(self, thing):
         """
-        Save an object to the database.
+        Save basic properties of an object to the database.
         """
+        #XXX: Should database drivers have ANY knowledge about Things?
         with Cursor(self) as c:
             # Note: Will fail if the row being updated does not match the dbtype of the Thing provided.
             c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, money=?, modified=?, lastused=?, desc=? WHERE id==? AND type==?""",
@@ -259,7 +308,7 @@ class SqliteDatabase(Database.Database):
         Load object out of the database.
         """
         with Cursor(self) as c:
-            c.execute("""SELECT name, type, flags, parent, owner, link, money, created, modified, lastused FROM objects WHERE id==?""", (obj,))
+            c.execute("""SELECT type, name, flags, parent, owner, link, money, created, modified, lastused FROM objects WHERE id==?""", (obj,))
             return c.fetchone()
 
     def _db_get_contents(self, obj):
@@ -303,5 +352,5 @@ class SqliteDatabase(Database.Database):
 
     def _db_create_new_object(self, dbtype, name, parent, owner):
         with Cursor(self) as c:
-            c.execute("""INSERT INTO objects VALUES ("""
+            c.execute("""INSERT INTO objects VALUES (""") #TODO: Finish this
 

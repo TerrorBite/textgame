@@ -21,15 +21,20 @@ class Thing(object):
         # Keep a reference to the world instance
         self.world = world
 
+        # Set up properties cache
+        self._propcache = {}
+        self._propdirty = set()
+
         # Set basic params
         self._obj, self.name, self.flags, self.money = (obj, name, flags, money)
         self._created, self._modified, self._lastused = (created, modified, lastused) ###
 
-        self._desc = world.db.get_property(obj, '_/desc')
+        # Precache our description
+        self._propcache['_/desc'] = world.db.get_property(obj, '_/desc')
 
         self.owner = world.get_thing(owner_id)
         self.parent = world.get_thing(parent_id)
-        self.link = world.get_thing(link_id) if link_id else None
+        self.link = world.get_thing(link_id) if link_id is not None else None
 
         log(LogLevel.Trace, 'A new Thing was instantiated with (ID:{0}) (name:{1}) (parentID:{2})'.format(self._obj, self.name, self.parent.id))
 
@@ -46,10 +51,15 @@ class Thing(object):
         self.world.save_thing(self)
 
     def __getitem__(self, key):
-        return self.world.db.get_property(self._obj, key)
+        if key not in self._propcache:
+            # Property cache miss
+            self._propcache[key] = self.world.db.get_property(self._obj, key)
+        return self._propcache[key]
 
     def __setitem__(self, key, value):
-        self.world.db.set_property(self._obj, key, value)
+        self._propdirty.add(key)
+        self._propcache[key] = value
+        #self.world.db.set_property(self._obj, key, value)
 
     @property
     def id(self):
@@ -65,18 +75,21 @@ class Thing(object):
 
     @property
     def type(self):
-        "Gets the Python type of this Thing (useful with a ThingProxy). Read-only."
+        """
+        Gets the Python type of this Thing. Read-only.
+        This is useful when everything is a ThingProxy but you need to know the true type.
+        """
         return type(self)
 
     @property
     def desc(self):
         "Gets the description of this Thing."
-        return self._desc
+        return self._propcache['_/desc']
 
     @desc.setter
     def desc(self, value):
         self.world.db.set_property(self._obj, '_/desc', value)
-        self._desc = value
+        self._propcache['/desc'] = value
 
     @property
     def created(self):
@@ -101,6 +114,11 @@ class Thing(object):
         return items
 
     def get_desc_for(self, looker):
+        """
+        Gets the processed description text as seen by the looker.
+        If the description contains Interscript, then the result may
+        vary depending who is looking at this object.
+        """
         #in future put extra processing here
         return self.desc if self.desc else "You see nothing special."
     

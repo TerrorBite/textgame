@@ -100,13 +100,13 @@ class Database(object):
 
         result = self._db_load_object(obj)
         try:
-            obtype = DBType(result[1])
+            obtype = DBType(result[0])
         except IndexError as e:
-            raise ValueError("Unknown DBType {0} while loading #{1} from the database!".format(result[1], obj))
+            raise ValueError("Unknown DBType {0} while loading #{1} from the database!".format(result[0], obj))
 
-        log(LogLevel.Debug, "We loaded {1}#{0} (type={2}) out of the database!".format(result[0], obj, obtype))
+        log(LogLevel.Debug, "We loaded {1}#{0} (type={2}) out of the database!".format(result[1], obj, obtype))
 
-        newobj = Thing_of_type(obtype)(world, obj, *result)
+        newobj = Thing_of_type(obtype)(world, obj, *result[1:])
 
         log(LogLevel.Debug, "Database.load_object(): Returning {0}".format(repr(newobj)))
         return newobj
@@ -135,7 +135,7 @@ class Database(object):
         if result is None: return (None, None, None, None, None)
         return result
 
-    def new_object(self, objtype, owner, parent):
+    def new_object(self, objtype, name, parent, owner):
         """
         Initializes a new database object, returning the database ID of the object.
 
@@ -151,7 +151,8 @@ class Database(object):
         newid = self._db_get_available_id()
         if newid is None:
             newid = self._db_create_new_object()
-        thing = 
+        thing = objtype(self.world, newid, name, 0, parent, owner, None, 0, 0, 0, 0)
+	return thing
     
     ### Abstract Methods ###
     # The following methods need to be overridden in derived classes.
