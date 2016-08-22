@@ -10,7 +10,7 @@ from twisted.conch.insults import insults
 from Util import enum, log, LogLevel
 import World, Things
 
-State = enum('New', 'LoggedIn')
+State = enum('New', 'LoggedIn', 'Online')
 
 prelogincmds = []
 commands = {}
@@ -124,6 +124,10 @@ class User(object):
             self.send_message("Your login failed. Try again.")
         return
 
+    @commandHandler('@save')
+    def cmd_save(self, params):
+        self.world.save_everything()
+
     def complete_login(self):
         self.my_state = State.LoggedIn
         log(LogLevel.Notice, "{0}#{1} connected from {2}".format(self.player.name, self.player.id, '<unknown>'))
@@ -133,7 +137,9 @@ class User(object):
         self.send_message("You are carrying: {0}".format(', '.join(map(lambda x: x.name, self.player.contents))))
      
     def process_line(self, line):
-        "Process input"
+        """
+        Processes input from the user.
+        """
 
         if line == '': return
         words = line.split()
@@ -141,7 +147,7 @@ class User(object):
         params = words[1:] if len(words) > 1 else []
 
         # Are we logged in?
-        if self.my_state < State.LoggedIn:
+        if self.my_state < State.Online:
             # Only prelogin commands may be used
             if words[0] in prelogincmds:
                 commands[words[0]](self, params)
@@ -150,6 +156,11 @@ class User(object):
             return
 
         # Everything following this point can only be run on a logged in character.
+        # Commands are essentially checked with the following priority:
+        # 1. Special prefixes (@ : ")
+        # 2. Matching actions/exits
+        # 3. Builtin commands
+
         # Check for common prefixes:
 
         # Builtin say command
@@ -166,8 +177,10 @@ class User(object):
             # Send message to others who can see it
             # TODO: Insert code here
             return
+
         if line[0] != '@':
-            # TODO: try and activate the named action/exit
+            # Try and activate the named action/exit, unless the user's command begins with @
+            # (it should NEVER be possible for in-world objects to override an @command)
             thing = self.player
             while True:
                 actions = filter(lambda x: x.type is Things.Action and x.name.lower().startswith(words[0].lower()), thing.contents)
@@ -188,6 +201,7 @@ class User(object):
                 else:
                     thing = thing.parent
 
+        # Non-@ builtin commands have the lowest priority (so that they can be overridden).
         # Command dispatch map. Most commands should be accessed this way.
         if words[0] in commands.keys():
             try:

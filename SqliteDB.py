@@ -223,11 +223,15 @@ class SqliteDatabase(Database.Database):
         Save an object to the database.
         """
         c = self.conn.cursor()
-        c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, modified=?, lastused=?, desc=? WHERE id==?""",
-                (thing.parent.id, thing.owner.id, thing.name, thing.flags, thing.link.id if thing.link else None,
-                    thing.modified, thing.lastused, thing.desc, thing.id))
-        c.execute("""UPDATE messages SET succ=?, fail=?, osucc=?, ofail=?, 'drop'=? WHERE obj==?""",
-                (thing.desc, thing.succ, thing.fail, thing.osucc, thing.ofail, thing.drop, thing.id))
+        #c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, modified=?, lastused=?, desc=? WHERE id==?""",
+        #        (thing.parent.id, thing.owner.id, thing.name, thing.flags, thing.link.id if thing.link else None,
+        #            thing.modified, thing.lastused, thing.desc, thing.id))
+        # id, name, type, flags, parent, owner, link, money, created, modified, lastused, desc
+        c.execute("""INSERT OR REPLACE INTO objects VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (thing.id, thing.name, int(thing.dbtype), thing.flags, thing.parent.id, thing.owner.id,
+                    thing.link.id if thing.link else None, thing.money, thing.created, thing.modified, thing.lastused, thing.desc))
+        #c.execute("""UPDATE messages SET succ=?, fail=?, osucc=?, ofail=?, 'drop'=? WHERE obj==?""",
+        #        (thing.desc, thing.succ, thing.fail, thing.osucc, thing.ofail, thing.drop, thing.id))
         c.close()
 
     def db_load_object(self, obj):

@@ -206,6 +206,11 @@ class World(object):
     def save_thing(self, thing):
         self.db.save_object(thing)
 
+    def save_everything(self):
+        for obj in objects:
+            if obj.dirty:
+                obj.force_save()
+
     def find_user(self, name):
         """
         Find a connected user by the given character name.

@@ -22,15 +22,27 @@ class DatabaseNotConnected(Exception):
     pass
 
 class Database(object):
+    """
+    Represents a connection to a database.
+
+    This is an abstract class, and should not be used directly. Instead you should use
+    a subclass such as SqliteDatabase.
+    """
+    def __init__(self):
+        raise NotImplementedError("Can't initialize abstract Database class (use a specific database implementation instead)")
 
     def create_hash(self, password):
-        """Create a password hash and matching salt for the first time."""
+        """
+        Create a password hash and matching salt for the first time.
+        """
         salt = struct.pack('Q', random.getrandbits(64))
         pwhash = self.hash_pass(password, salt)
         return pwhash, salt.encode('hex_codec')
 
     def hash_pass(self, password, salt):
-        """Compute a password hash given a plaintext password and a binary salt value."""
+        """
+        Compute a password hash given a plaintext password and a binary salt value.
+        """
         return hashlib.sha1("{0}{1}".format(salt, hashlib.sha1(password).digest())).hexdigest()
 
     def player_login(self, username, password):
@@ -62,9 +74,6 @@ class Database(object):
     def set_property(self, obj, key, value):
         self.db_set_property(obj, key, value)
 
-    def __init__(self):
-        raise NotImplementedError("Can't initialize Database class: Need a specific database implementation")
-
     def close(self):
         log(LogLevel.Info, "Closing database connection.")
         self.conn.close()
@@ -86,16 +95,10 @@ class Database(object):
         log(LogLevel.Debug, "Database.load_object(): Returning {0}".format(repr(newobj)))
         return newobj
 
-    def db_load_object(self, obj):
-        """
-        In implementations, returns a tuple of raw data loaded from the database for a given ID.
-        Tuple is in the following order:
-        (name, type, flags, parent, owner, link, money, created, modified, lastused)
-        """
-        raise NotImplementedError("Abstract method")
-
     def save_object(self, thing):
-        """Saves a modified object back to the database."""
+        """
+        Saves a modified object back to the database.
+        """
         if not active: raise DatabaseNotConnected()
         log(LogLevel.Trace, "Saving {0} to the database...".format(thing))
         assert thing is not None, "Cannot save None!"
@@ -106,7 +109,6 @@ class Database(object):
 
         return self.db_get_contents(obj)
 
-
     def get_messages(self, obj):
         if not active: raise DatabaseNotConnected()
 
@@ -115,8 +117,53 @@ class Database(object):
         return result
 
     def get_new_id(self):
-
         pass
+
+    # Abstract methods:
+    # Any method whose name begins with "db_" is implementation-specific.
+    # The method stubs below mainly exist for documentation purposes.
+    def db_create_schema(self):
+        """
+        Abstract method. Creates and initializes database structures that may be missing.
+
+        This method is called on every startup, regardless of the state of the database.
+        It should check for missing tables and create any that are not found. It should also
+        check the database schema version and update it if it is out of date. Note that the
+        exact database schema is implementation-dependent.
+        """
+        raise NotImplementedError("Abstract method")
+
+    def db_load_object(self, obj):
+        """
+        Abstract method. Returns a tuple of raw data loaded from the database for a given ID.
+
+        Tuple is in the following order:
+        (name, type, flags, parent, owner, link, money, created, modified, lastused)
+        """
+        raise NotImplementedError("Abstract method")
+
+    def db_save_object(self, thing):
+        """
+        Abstract method. Accepts a Thing and creates or updates its matching database record.
+
+        This method should treat the Thing passed to it as read-only.
+        """
+        raise NotImplementedError("Abstract method")
+
+    def db_get_contents(self, obj):
+        """
+        Abstract method. Given a database ID, returns a list of database IDs of objects which
+        are contained by this object.
+        """
+        raise NotImplementedError("Abstract method")
+
+    def db_get_user(self, username):
+        """
+        Abstract method. Given a username, returns a 3-tuple of (pwhash, salt, playerid)
+        consisting of the user's hashed password, the salt that was used in the hash,
+        and the database ID of the user's Player object.
+        """
+
 
 
 from twisted.internet import defer
@@ -142,9 +189,15 @@ class CredentialsChecker(object):
             print_exc(e)
 
 if __name__ == '__main__':
-    d = Database()
+
+    class TestDatabase(Database):
+        def __init__(self):
+            pass
+
+    d = TestDatabase()
     
-    log(LogLevel.Info, "Test successful password check: " + repr(d.check_pass('admin', 'admin')))
-    log(LogLevel.Info, "Test failed password check: " + repr(d.check_pass('admin', 'wrongpass')))
+    # TODO: How do we test this?
+    #log(LogLevel.Info, "Test successful password check: " + repr(d.check_pass('admin', 'admin')))
+    #log(LogLevel.Info, "Test failed password check: " + repr(d.check_pass('admin', 'wrongpass')))
 
     d.close()
