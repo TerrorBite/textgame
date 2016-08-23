@@ -217,8 +217,12 @@ class World(object):
             log(LogLevel.Trace, "Cache: Hit #{0}".format(obj))
             return self.cache[obj]
 
-    def purge_cache(self, expiry=3600):
-        "Remove all cached objects older than the given time."
+    def purge_cache(self, expiry=3600): #TODO: Rename this function?
+        """
+        Remove from the cache all cached objects older than the given time.
+        
+        Save any objects that have been modified since they were cached.
+        """
         threshold = int(time.time()) - expiry
         cachesize = len(self.cache)
         #self.cache = [x for x in self.cache if x[1] > threshold]
@@ -241,6 +245,7 @@ class World(object):
             raise TypeError("Expected a Thing as argument")
 
     def save_thing(self, thing):
+        #TODO: Review this function vs. calling thing.force_save()
         # Save Thing basic info
         self.db.save_object(thing)
         # Save any modified properties of the Thing

@@ -93,18 +93,19 @@ CREATE TABLE IF NOT EXISTS objects (
     -- Extended data is stored in other tables, or as properties.
     -- This should make it faster to perform basic queries on an object.
 
-    id INTEGER PRIMARY KEY ASC,     -- Primary database ID of this object (alias to built in rowid column)
-    name TEXT NOT NULL,             -- Name of the object
-    type INTEGER NOT NULL,          -- Type of the object (Room=0, Player=1, Item=2, Action=3, Script=4)
-    flags INTEGER NOT NULL,         -- Object flags
-    parent INTEGER NOT NULL,        -- Parent (location) of this object
-    owner INTEGER NOT NULL,         -- Owner of this object
-    link INTEGER,                   -- Link to another object (home, or action)
-    money INTEGER,                  -- Amount of currency that this object contains
-    created INTEGER,                -- Timestamp object was created (seconds since unix epoch)
-    modified INTEGER,               -- When the object was last modified in any way
-    lastused INTEGER,               -- When the object was last used (without modifying it)
-    desc TEXT,                      -- Object description - this field is deprecated
+    id INTEGER PRIMARY KEY ASC,       -- Primary database ID of this object (alias to built in rowid column)
+    name TEXT NOT NULL,               -- Name of the object
+    type INTEGER NOT NULL,            -- Type of the object (Room=0, Player=1, Item=2, Action=3, Script=4)
+    flags INTEGER NOT NULL,           -- Bitfield of object flags
+    parent INTEGER NOT NULL,          -- ID of the parent object (i.e. location) of this object
+    owner INTEGER NOT NULL,           -- ID of owner of this object
+    link INTEGER DEFAULT NULL,        -- Link to another object (home, or action). Null if unlinked.
+    money INTEGER DEFAULT 0 NOT NULL, -- Amount of currency that this object contains
+                                      -- The following timestamps are in unix time:
+    created INTEGER DEFAULT (strftime('%s','now')),  -- Time of creation
+    modified INTEGER DEFAULT (strftime('%s','now')), -- Time last modified in any way
+    lastused INTEGER DEFAULT (strftime('%s','now')), -- Time last used (without modifying it)
+    desc TEXT,                        -- Object description - this field is deprecated
 
     FOREIGN KEY(parent) REFERENCES objects(id),
     FOREIGN KEY(owner) REFERENCES objects(id),
@@ -131,8 +132,9 @@ CREATE TABLE IF NOT EXISTS objects (
                  (1, 'The Creator',   1,  0,  0,  1, None, 0, now, now, now, None),
                  # Other test objects
                  (2, 'no tea',        2,  0,  1,  1,  1,   0, now, now, now, None),
-                 (3, 'west',          3,  0,  0,  1,  0,   0, now, now, now, None)]
-
+                 (3, 'west',          3,  0,  0,  1,  0,   0, now, now, now, None),
+                 (4, 'drink',         3,  0,  2,  1,  0,   0, now, now, now, None),
+                ]
             c.executemany("""INSERT INTO objects VALUES(?,?, ?,?,?,?,?, ?, ?,?,?, ?)""", t)
             # Set Room #0's owner as God
             c.execute("""UPDATE objects SET owner=1 WHERE id=0""")
@@ -215,7 +217,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS key_index ON props(
                 (2, '_/desc', "You really wish you had a cup of tea right about now."),
                 (3, '_/desc', "There's nothing exciting in that direction."),
                 (3, '_/succ', "Life is peaceful there..."),
-                (3, '_/fail', "The way is closed.")]
+                (3, '_/fail', "The way is closed."),
+                (4, '_/fail', "You can't drink tea that you don't have."),
+              ]
             c.executemany("""INSERT INTO props VALUES (?, ?, ?)""", t)
             log(LogLevel.Info, '- Created props table.')
 
@@ -292,11 +296,12 @@ CREATE TABLE IF NOT EXISTS scripts (
 
     def _db_save_object(self, thing):
         """
-        Save basic properties of an object to the database.
+        Save basic properties of an object to the database. The object must already exist.
         """
-        #XXX: Should database drivers have ANY knowledge about Things?
+        #NOTE: Should database drivers have ANY knowledge about Things?
         with Cursor(self) as c:
             # Note: Will fail if the row being updated does not match the dbtype of the Thing provided.
+            #NOTE: Should we use INSERT OR REPLACE INTO instead?
             c.execute("""UPDATE objects SET parent=?, owner=?, name=?, flags=?, link=?, money=?, modified=?, lastused=?, desc=? WHERE id==? AND type==?""",
                     (thing.parent.id, thing.owner.id, thing.name, thing.flags, thing.link.id if thing.link else None,
                         thing.money, thing.modified, thing.lastused, thing.desc, thing.id, int(thing.dbtype)))
@@ -351,6 +356,16 @@ CREATE TABLE IF NOT EXISTS scripts (
             return result[0] if result else None # TODO
 
     def _db_create_new_object(self, dbtype, name, parent, owner):
-        with Cursor(self) as c:
-            c.execute("""INSERT INTO objects VALUES (""") #TODO: Finish this
+        with Cursor(self) as c: 
+            c.execute("""BEGIN""")
+            c.execute("SELECT obj FROM deleted ORDER BY obj ASC LIMIT 1")
+            obj = c.fetchone() # If obj is None, Sqlite will use the next available ID
+            c.execute(
+            """INSERT OR REPLACE INTO objects(id, name, type, flags, parent, owner)"""\
+                                   """VALUES (?,  ?,    ?,    0,     ?,      ?    )""",
+                    obj, name, dbtype, parent, owner )
+            # if obj is not present in deleted, this will do nothing
+            c.execute("""DELETE FROM deleted WHERE id = ?""", obj)
+            c.execute("""COMMIT""")
+            return c.lastrowid            
 

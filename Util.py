@@ -136,17 +136,13 @@ def pip_install(*packages):
     try:
         import pip
     except ImportError as e:
-        loglevel.Error("pip is not installed")
+        log(LogLevel.Error, "pip is not installed")
         return False
 
-    if pip.util.ask("The following packages are required:\r\n    {0}\r\n"\
+    if pip.utils.ask("The following packages are required:\r\n    {0}\r\n"\
             "Do you want to install them now using pip? (yes/no): "
             .format(', '.join(packages)) , ['yes', 'no']) == 'no': return False
 
-    try:
-        result = pip.main(['install']+packages)
-    except SystemExit as exit:
-        # pip tried to abort
-        return False
+    result = pip.main(['install']+list(packages))
     return result==0
 

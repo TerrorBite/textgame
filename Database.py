@@ -40,13 +40,17 @@ class Database(object):
         pass
 
     def create_hash(self, password):
-        """Create a password hash and matching salt for the first time."""
+        """
+        Create a password hash and matching salt for the first time.
+        """
         salt = struct.pack('Q', random.getrandbits(64))
         pwhash = self.hash_pass(password, salt)
         return pwhash, salt.encode('hex_codec')
 
     def hash_pass(self, password, salt):
-        """Compute a password hash given a plaintext password and a binary salt value."""
+        """
+        Compute a password hash given a plaintext password and a binary salt value.
+        """
         return hashlib.sha1("{0}{1}".format(salt, hashlib.sha1(password).digest())).hexdigest()
 
     def player_login(self, username, password):
@@ -95,7 +99,9 @@ class Database(object):
         self.active = False
 
     def load_object(self, world, obj):
-        """Loads and returns an object out of the database."""
+        """
+        Loads and returns an object out of the database.
+        """
         if not active: raise DatabaseNotConnected()
 
         result = self._db_load_object(obj)
@@ -112,7 +118,9 @@ class Database(object):
         return newobj
 
     def save_object(self, thing):
-        """Saves a modified object back to the database."""
+        """
+        Saves a modified object back to the database.
+        """
         if not active: raise DatabaseNotConnected()
         log(LogLevel.Trace, "Saving {0} to the database...".format(thing))
         assert thing is not None, "Cannot save None!"
@@ -163,12 +171,17 @@ class Database(object):
         """
         Abstract method.
 
-        This method is responsible for ensuring the database is in a state ready for use.
+        This method is responsible for ensuring the database is in a state ready for use. It
+        is called on every startup, regardless of the state of the database.
+
         Given an empty database, this method should create any missing tables or other data
         structures, and ensure that they are initialized to a state where the world may start.
 
         In particular, this method should ensure that Room #0 and Player #1 exist, and should
         correctly initialize them if they do not.
+
+        It is also responsible for checking the database schema version, and running statements
+        to upgrade the database if the schema is out of date.
         """
         pass
 
@@ -203,7 +216,13 @@ class Database(object):
         Abstract method.
         
         In implementations, causes the given object to be saved back to the database.
+
+        Errata: This method accepts a Thing as input, and should treat it as read-only.
+        This needs to be changed so that it instead receives a tuple of data, the same
+        way that _db_load_object() returns a tuple of data (and preferably in the same
+        order).
         """
+        #TODO: Accept a tuple instead of a Thing.
         pass
 
     @abstractmethod
@@ -235,6 +254,7 @@ class Database(object):
 
         NOTE: This may soon change when multiple characters per user is implemented.
         """
+        pass
 
     @abstractmethod
     def _db_get_contents(self, obj):

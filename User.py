@@ -130,6 +130,17 @@ class User(object):
             if params[0] == 'cache':
                 self.world.purge_cache(10)
 
+    @commandHandler('@save')
+    @commandHelpText("Allows admins to immediately save the world to the database.")
+    def cmd_save(self, params):
+        """
+        This command saves the database immediately.
+        """
+        if self.player.id != 1:
+            self.send_message("You're not allowed to do that.")
+            return
+        self.world.purge_cache(-1)
+
     @commandHandler('@quit', 'QUIT', prelogin=True)
     @commandHelpText("Disconnects you completely from the server.")
     def cmd_QUIT(self, params):
@@ -223,7 +234,9 @@ class User(object):
         self.send_message("You are carrying: {0}".format(', '.join(map(lambda x: x.name, self.player.contents))))
      
     def process_line(self, line):
-        "Process input"
+        """
+        Processes a line of input from the user.
+        """
 
         if line == '': return
         words = line.split()
@@ -240,7 +253,10 @@ class User(object):
             return
 
         # Code execution only proceeds beyond this point on a logged in character.
-        # Check for common prefixes:
+        # Commands are checked in the following order:
+        # 1. Special prefixes (including @commands and the "say and :pose builtins)
+        # 2. Matching actions (in order: player, room, objects in room, and then parent rooms)
+        # 3. Builtin commands that do not have a special prefix
 
         # Builtin say command
         if line[0] == '"':
@@ -256,27 +272,40 @@ class User(object):
             # Send message to others who can see it
             # TODO: Insert code here
             return
+
+        # If input begins with @, skip looking for actions (an action should never
+        # begin with a @ character). Otherwise...
         if line[0] != '@':
-            # TODO: try and activate the named action/exit
+            # Start the search at the player
             thing = self.player
             while True:
-                actions = filter(lambda x: x.type is Things.Action and x.name.lower().startswith(words[0].lower()), thing.contents)
+                log(LogLevel.Trace, "Searching {0} for {1}".format(thing.name, words[0]))
+                # Retrieve a list of Actions contained by this thing, which match the word entered
+                actions = [x for x in thing.contents if x.type is Things.Action and x.name.lower().startswith(words[0].lower())]
                 log(LogLevel.Trace, "{0} contains {1}, matching: {2}".format(thing, thing.contents, actions))
-                if len(actions) > 1:
-                    self.send_message("I don't know which one you mean!")
-                    return
-                elif len(actions) == 1:
-                    a = actions[0]
-                    if a.use(self.player):
-                        self.send_message(actions[0]['_/succ'] or "You go {0}.".format(a.name))
-                    else:
-                        self.send_message(actions[0]['_/fail'] or "This exit leads nowhere.") 
-                    return
-                elif thing.id == 0:
-                    # We ended up in room #0 and no action was found 
-                    break
-                else:
-                    thing = thing.parent
+
+                # Process list, and return if actions were found
+                if self.process_action_list(actions): return
+
+                log(LogLevel.Trace, "Searching {0}'s contents for {1}".format(thing.name, words[0]))
+                # Retrieve a list of Items contained by this thing, and look for Actions on them
+                actions = reduce(lambda x,y: x+y,
+                    [
+                        [action for action in item.contents
+                            if action.type is Things.Action
+                            and action.name.lower().startswith(words[0].lower())
+                        ] for item in thing.contents
+                        if item.type is Things.Item
+                    ] , [])
+                log(LogLevel.Trace, "{0}'s contents contain matching: {1}".format(thing, actions))
+
+                # Process list, and return if actions were found
+                if self.process_action_list(actions): return
+
+                # Move to this Thing's parent and keep searching, unless we reached Room #0
+                # in which case we are at the root of the parent tree and we give up.
+                if thing.id == 0: break
+                else: thing = thing.parent
 
         # Command dispatch map. Most commands should be accessed this way.
         if words[0] in commands.keys():
@@ -294,6 +323,25 @@ class User(object):
         # If control fell through this far, then we have an unknown command/action
         self.send_message("I don't know what that means.")
         return
+
+    def process_action_list(self, actions):
+        if len(actions) > 1:
+            # Too many actions
+            self.send_message("I don't know which one you mean!")
+        elif len(actions) == 1:
+            # Only one thing matches. This must be it.
+            a = actions[0]
+            # Use the Action as ourselves, check for success
+            # TODO: need to send the message BEFORE the Action has any other side effects
+            if a.use(self.player):
+                self.send_message(actions[0]['_/succ'] or "You go {0}.".format(a.name))
+            else:
+                self.send_message(actions[0]['_/fail'] or "This exit leads nowhere.")
+        else:
+            # No actions found
+            return False
+        
+        return True # Found a match
 
 
 class SSHUser(avatar.ConchUser, User):
