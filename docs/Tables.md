@@ -81,6 +81,10 @@ When a new object is created, the first ID in this table (if any) is removed and
 The details of the deleted object with that ID are then overwritten with those of the new object, and the old object is lost forever.
 This system allows IDs to be reused and doesn't leave "holes" in the database.
 
+When an object is deleted, any objects contained inside the deleted object fall through into its parent. Any objects that link to the deleted object will have their links updated to the deleted object's parent.
+
+If the deleted object is a player, then objects once owned by the player will become owned by #0: this value has the special meaning of "Unowned" and allows anyone to claim an object as theirs. (The @disown command can be used to change an object you use to unowned, and the @claim command can be used to claim such an object).
+
 ## `props` (properties) table
 
 to be written

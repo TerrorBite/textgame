@@ -11,6 +11,8 @@ re_special = re.compile(ur'[][<]')
 re_unescape = re.compile(ur'\\([][<>{}\\])')
 re_funcname = re.compile(ur'\[(\w+)([]:])')
 
+EMPTY = u''
+
 funchandlers = {}
 class funcHandler:
     """
@@ -60,9 +62,15 @@ class ResolvableText(object):
         Resolves this ResolvableText to a string, returning the string.
         Any callables embedded within the ResolvableText will be called, and the return value substituted into the string.
         """
-        if self.resolved is None:
-            self.resolved = u''.join([x() if callable(x) else x for x in self.parts])
+        self.resolved = EMPTY.join([x() if callable(x) else x for x in self.parts])
         return self.resolved
+
+    def source(self):
+        """
+        Resolves this ResolvableText to a string, returning the string.
+        Any callables embedded within the ResolvableText will have their source Interscript (if available) substituted into the string, instead of being called.
+        """
+        return EMPTY.join([x.source if callable(x) else x for x in self.parts])
 
     def split(self, sep):
         """
@@ -108,11 +116,13 @@ def wrap_func(func, params, resolve=True):
         if resolve:
             return func(*[p.resolve() if isinstance(p, ResolvableText) else p for p in params])
         else:
-            return func(*params) # Will all params be ResolvableTexts?
+            #return func(*[p if isinstance(p, ResolvableText) else ResolvableText(p) for p in params])
+            return func(*params)
     return wrapper
 
 
 class Parser(object):
+
 
     def depth_meter(func):
         """debug function"""
@@ -185,7 +195,8 @@ class Parser(object):
 
         # Wrap the function and return it
         func = funchandlers[funcname]
-        func = wrap_func(func, [self]+params)
+        func = wrap_func(func, [self]+params, func.resolve)
+        func.source = source[:consumed]
         return func, consumed
 
     def _parse_text(self, source):
@@ -248,22 +259,45 @@ class Parser(object):
 #        else: fname = func
 #        return func
 
+    def eval_boolean(self, val):
+        return bool(int(val) if val.isdigit() else val)
+
     # The "if" function needs to do flow control.
     # In order to prevent funcs in the "true" section from executing if the expr is not true,
     # we ask the funcHandler machinery not to resolve parameters for us.
     @funcHandler('if', resolve_params=False)
     def func_if(self, expr, iftrue, iffalse=None):
         expr = expr.resolve()
-        if expr:
+        if self.eval_boolean(expr):
             return iftrue.resolve()
         elif iffalse is not None:
             return iffalse.resolve() 
         else:
-            return ''
+            return EMPTY
+
+    @funcHandler('eval')
+    def func_eval(self, value):
+        return self.parse(value)
+
+    @funcHandler('lit', resolve_params=False)
+    def func_lit(self, *values):
+        return u','.join([v.source() for v in values])
+
+    @funcHandler('repeat', resolve_params=False)
+    def func_repeat(self, count, value):
+        count = count.resolve()
+        if(count.isdigit()):
+            output=[]
+            for x in range(int(count)):
+                output.append(value.resolve())
+            return EMPTY.join(output)
+        else:
+            raise ValueError()
+
 
     @funcHandler('null')
     def func_null(self, *params):
-        return ''
+        return EMPTY
 
     @funcHandler('name')
     def func_name(self, dbref):
@@ -284,7 +318,7 @@ class Parser(object):
     @funcHandler('cat')
     def func_cat(self, *params):
         # Largely a test function. Useless in practice.
-        return ''.join(params)
+        return EMPTY.join(params)
 
         
 if __name__ == '__main__':
@@ -303,3 +337,10 @@ if __name__ == '__main__':
     for test in test_strings:
         print "INPUT : " + repr(test)
         print "OUTPUT: " + repr(p.parse(test))
+    try:
+        print "Enter further test lines, Ctrl-C to end"
+        while True:
+            print "=> " + p.parse(raw_input("<= "))
+    except KeyboardInterrupt:
+        pass
+
