@@ -16,9 +16,11 @@ class funcHandler:
     """
     Decorator that marks a method as a command handler.
     """
-    def __init__(self, *aliases):
-        self.funcs = aliases
+    def __init__(self, alias, resolve_params=True):
+        self.funcs = [alias]
+        self.resolve = resolve_params
     def __call__(self, f):
+        f.resolve = self.resolve
         for func in self.funcs:
             funchandlers[func] = f
 
@@ -26,8 +28,8 @@ class ResolvableText(object):
     """
     Class that represents a string of text which may contain callables which need to be resolved to text.
     """
-    def __init__(self):
-        self.parts = []
+    def __init__(self, init=None):
+        self.parts = [] if init is None else [str(init)]
         self.resolved = None
     def __iadd__(self, other):
         """
@@ -92,7 +94,7 @@ class ResolvableText(object):
         return out            
 
 
-def wrap_func(func, params):
+def wrap_func(func, params, resolve=True):
     """
     Wraps a function, taking a sequence of parameters. Returns the wrapper.
     The wrapper, when called, will resolve any ResolvableText parameters to strings, then call the original function with the resulting parameter list.
@@ -103,7 +105,10 @@ def wrap_func(func, params):
     #print "{2}Wrapping: {0} with params {1}".format(func.__name__, repr(params), depth*' ')
     @wraps(func)
     def wrapper():
-        return func(*[p.resolve() if isinstance(p, ResolvableText) else p for p in params])
+        if resolve:
+            return func(*[p.resolve() if isinstance(p, ResolvableText) else p for p in params])
+        else:
+            return func(*params) # Will all params be ResolvableTexts?
     return wrapper
 
 
@@ -155,7 +160,7 @@ class Parser(object):
 
         return re_interscript.sub(repl, string)
 
-    @depth_meter
+    #@depth_meter #TODO: Debug decorator, remove this
     def _parse_func(self, source):
         """
         Parses a function.
@@ -178,6 +183,7 @@ class Parser(object):
             consumed += paramslen
         # we're now at the end of the function
 
+        # Wrap the function and return it
         func = funchandlers[funcname]
         func = wrap_func(func, [self]+params)
         return func, consumed
@@ -233,14 +239,27 @@ class Parser(object):
 
         return result, s+1
 
-    def _execute(self, func):
-        #TODO: Remove this
-        if ':' in func:
-            fname, params = func.split(':',1)
-            #TODO: param value escaping?
-            params = params.split(',')
-        else: fname = func
-        return func
+#    def _execute(self, func):
+#        #TODO: Remove this
+#        if ':' in func:
+#            fname, params = func.split(':',1)
+#            #TODO: param value escaping?
+#            params = params.split(',')
+#        else: fname = func
+#        return func
+
+    # The "if" function needs to do flow control.
+    # In order to prevent funcs in the "true" section from executing if the expr is not true,
+    # we ask the funcHandler machinery not to resolve parameters for us.
+    @funcHandler('if', resolve_params=False)
+    def func_if(self, expr, iftrue, iffalse=None):
+        expr = expr.resolve()
+        if expr:
+            return iftrue.resolve()
+        elif iffalse is not None:
+            return iffalse.resolve() 
+        else:
+            return ''
 
     @funcHandler('null')
     def func_null(self, *params):
@@ -253,6 +272,14 @@ class Parser(object):
 
         #TODO: Implement this
         return "[NAMEOF#{0}]".format(dbref)
+
+    @funcHandler('ref')
+    def func_ref(self, name):
+        # Resolves a name to a dbref
+        if name.startswith('#') and name[1:].isdigit():
+            return name
+        else:
+            pass #TODO: Name lookup
 
     @funcHandler('cat')
     def func_cat(self, *params):
@@ -268,6 +295,8 @@ if __name__ == '__main__':
             "{[null]}",
             "This string contains {[cat:some, ,Interscript]}.",
             "This is {[cat:nested,[name:#925][null:This text is invisible] ,Interscript]}!",
+            "I am {<me>}.",
+            "I am {[cat:<me>]}.",
             ]
     #test_strings.append(' '.join(test_strings))
 
