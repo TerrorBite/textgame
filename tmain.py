@@ -22,7 +22,7 @@ def main():
 
     import World
     log(LogLevel.Notice, 'Initializing world...')
-    world = World.getWorld()
+    world = World.getWorld() # Note: Currently, World is a singleton
     #world.db.db_get_user('admin')
 
     log(LogLevel.Debug, "Setting up ServerFactory")

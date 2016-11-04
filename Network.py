@@ -49,6 +49,10 @@ class BareUserProtocol(protocol.Protocol):
             self.buf += data
 
 class BasicUserSession(protocol.Protocol):
+    """
+    Basic user session. TODO: Expand this docstring
+    """
+    #TODO: Is this still used?
     def __init__(self, avatar=None):
         self.player = None
         self.buf = ''
@@ -84,15 +88,18 @@ class SSHRealm:
     """
     This simple realm generates User instances.
 
-    This is basically a factory for SSHUser instances. Upon a successful SSH login,
-    the SSHRealm is provided with the username, and uses it to create and return
-    an appropriate User instance.
+    This is basically a factory for SSHUser instances. After SSH authentication
+    has succeeded, the SSHRealm is provided with the username of the account that
+    just logged in, and uses it to create and return an appropriate User instance.
     """
     implements(portal.IRealm)
 
+    def __init__(self, world):
+        self.world = world
+
     def requestAvatar(self, avatarId, mind, *interfaces):
         if IConchUser in interfaces:
-            return interfaces[0], SSHUser(avatarId), lambda: None
+            return interfaces[0], SSHUser(self.world, avatarId), lambda: None
         else:
             log(LogLevel.Error, "SSHRealm: No supported interfaces")
             raise NotImplementedError("No supported interfaces found.")
@@ -104,6 +111,15 @@ def SSHFactoryFactory(world):
 
     This function is responsible for loading the SSH host keys that our
     SSH server will use, or generating them if they do not exist (if possible).
+
+    The reason why we have a double-factory setup is twofold:
+    
+    First, we need to dynamically load (or maybe generate) SSH host keys, and for
+    some reason, Twisted's SSHFactory seems to require the SSH keys to be present
+    as class attributes. The connection and userauth classes to use also need to
+    be set this way.
+
+    Second, this allows us to create a separate SSHFactory per world, should we ever
     """
 
     import os, sys
@@ -155,7 +171,7 @@ def SSHFactoryFactory(world):
                 'ssh-connection': connection.SSHConnection
                 }
         # This Portal tells us how to authenticate users
-        portal = Portal(SSHRealm(), [Database.CredentialsChecker(world.db)])
+        portal = Portal(SSHRealm(world), [Database.CredentialsChecker(world.db)])
 
     return SSHFactory()
     # End of SSH host key loading code

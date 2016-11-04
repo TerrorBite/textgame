@@ -63,10 +63,10 @@ class User(object):
 
     This class is responsible for parsing incoming text from a user, acting on commands, etc.
     """
-    def __init__(self, username, transport=None):
+    def __init__(self, world, username, transport=None):
         self.transport = transport
         self.username = username
-        self.world = World.getWorld()
+        self.world = world
         self.state = State.New
 
     def send_message(self, msg):
@@ -347,10 +347,10 @@ class User(object):
 class SSHUser(avatar.ConchUser, User):
     implements(ISession)
     
-    def __init__(self, username):
+    def __init__(self, world, username):
         self.savedSize = ()
         avatar.ConchUser.__init__(self) # don't change to super(), it will break
-        User.__init__(self, username)
+        User.__init__(self, world, username)
         # what does the following do?
         self.channelLookup.update({'session':session.SSHSession})
 
