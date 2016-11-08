@@ -55,7 +55,7 @@ def ThingProxyFactory(_world):
         """
 
         # Store a class-wide reference to the World that created us
-        world = _world
+        world = _world # type: World
 
         def __init__(self, world, objid):
 
@@ -63,7 +63,7 @@ def ThingProxyFactory(_world):
             self.__dict__.update({
                 '_thing': None,  # Reference to the underlying object
                 '_id':    objid, # Database ID of the object
-                'cachetime': 0,  # Used to calculate cache age
+                'cachetime': time.time(),  # Used to calculate cache age
                 '_dirty': False, # If the underlying instance is "dirty", then it should
                                  # be saved to the database by calling its save() method.
             })
@@ -223,7 +223,7 @@ class World(object):
         
         Save any objects that have been modified since they were cached.
         """
-        threshold = int(time.time()) - expiry
+        threshold = int(time.time()) - expiry # Threshold is a time in the past
         cachesize = len(self.cache)
         #self.cache = [x for x in self.cache if x[1] > threshold]
         objects = self.live_set.copy()
@@ -231,7 +231,7 @@ class World(object):
             if obj.cachetime < threshold:
                 obj.unload() # Save and unload the object
             elif obj.dirty:
-                obj.force_save()
+                obj.save()
         log(LogLevel.Trace, "Cache: Purged {0} stale objects from memory".format(len(objects)-len(self.live_set)))
 
     def get_contents(self, thing):
