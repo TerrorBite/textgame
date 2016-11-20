@@ -212,34 +212,55 @@ class SSHProtocol(recvline.HistoricRecvLine):
         self.keyHandlers['\x01'] = self.handle_HOME   # Make ^A work like Home
         self.keyHandlers['\x05'] = self.handle_END    # Make ^E work like End
         self.keyHandlers['\x0c'] = self.handle_CTRL_L # Redraws the screen
-        self.write_line("Debug: SSHProtocol welcomes you")
+        #self.write_line("Debug: SSHProtocol welcomes you")
 
     def initializeScreen(self):
         self.terminal.reset()
-        self.terminalSize(self.width, self.height)
+        self.redraw()
         self.setInsertMode()
 
     def terminalSize(self, width, height):
+        """
+        This method is called when the terminal size changes.
+        """
         self.width = width
         self.height = height
-        self.terminal.setScrollRegion(0, height - 4)
         self.redraw()
 
+    def handle_UP(self):
+        if self.lineBuffer and self.historyPosition == len(self.historyLines):
+            # append entered line onto history
+            self.historyLines.append(self.lineBuffer)
+        if self.historyPosition > 0:
+            self.reset_input()
+            self.historyPosition -= 1
+            self._deliverBuffer(self.historyLines[self.historyPosition])
+
+    def handle_DOWN(self):
+        if self.historyPosition < len(self.historyLines):
+            self.reset_input()
+            self.historyPosition += 1
+            if self.historyPosition < len(self.historyLines):
+                self._deliverBuffer(self.historyLines[self.historyPosition])
+
     def handle_HOME(self):
+        """
+        Handles the HOME key or equivalent.
+        Moves cursor and insertion point to the start of input.
+        """
         self._cpos_input(len(self.ps[self.pn]))
         #self.show_prompt()
         self.lineBufferIndex = 0
 
     def handle_END(self):
+        """
+        Handles the END key or equivalent.
+        Moves cursor and insertion point to the end of input.
+        """
         n = len(self.lineBuffer) + len(self.ps[self.pn])
         w = self.width
         self._cpos_input(n%w, n/w)
         self.lineBufferIndex = len(self.lineBuffer)
-
-    def _deliverBuffer(self, buf):
-        # XXX: GROSS HACK
-        self.terminal.eraseToDisplayEnd()
-        recvline.HistoricRecvLine._deliverBuffer(self, buf)
 
     #def keystrokeReceived(self, keyID, modifier):
         # XXX Debug only please remove
@@ -253,16 +274,19 @@ class SSHProtocol(recvline.HistoricRecvLine):
 
     def handle_CTRL_U(self):
         """Standard "clear line" keypress"""
-        self.handle_HOME()
+        self.reset_input()
+
+    def reset_input(self):
+        self._cpos_input()
         self.terminal.eraseToDisplayEnd()
+        self.show_prompt()
         self.lineBuffer = []
+        self.lineBufferIndex = 0
 
     def show_prompt(self):
         self.terminal.write(self.ps[self.pn])
 
     def lineReceived(self, line):
-        if line == 'exit':
-            self.terminal.loseConnection()
         log(LogLevel.Debug, "Received line: {0}".format(line))
         try:
             self.user.process_line(line)
@@ -285,9 +309,13 @@ class SSHProtocol(recvline.HistoricRecvLine):
         self.scrollback.append(line)
 
         self.terminal.saveCursor()
+        self.terminal.setScrollRegion(0, self.height - 4)
+
         self._cpos_print()
         self.terminal.nextLine()
         self.terminal.write(line)
+
+        self.terminal.setScrollRegion(self.height - 2, self.height)
         self.terminal.restoreCursor()
 
     def restore_scrollback(self):
@@ -305,9 +333,12 @@ class SSHProtocol(recvline.HistoricRecvLine):
         Should be used when screen size changes.
         """
         self.terminal.eraseDisplay()
+        self.terminal.setScrollRegion(0, self.height - 4)
         self.restore_scrollback()
         self.terminal.cursorPosition(0, self.height - 4)
         self.terminal.write('='*self.width)
+        self.terminal.setScrollRegion(self.height - 2, self.height)
+        self._cpos_input() # should work regardless of auto-margins
         self.drawInputLine()
 
     def _cpos_input(self, offset=0, line_offset=0):
