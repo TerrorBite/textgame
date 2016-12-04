@@ -14,6 +14,7 @@ This is basically just a username and password pair that then links to the id of
 
 ### Columns
 
+- `id`: ID number for this account (unique, non-null unsigned integer). Currently unused, but will be foreign key for future character-account mapping table. (sqlite: alias to rowid)
 - `username`: Username of this account.
 - `password`: Password hash, stored in hexadecimal.
 - `salt`: Salt used in password hash, stored in hexadecimal.
@@ -27,7 +28,7 @@ Any additional data is generally stored as properties on the object. Properties 
 
 ### Columns
 
-- `id`: The database ID of the object. This is a unique, non-null unsigned integer.
+- `id`: The database ID of the object. This is a unique, non-null unsigned integer. In sqlite, this is an alias to the built-in rowid.
 - `name`: A name for this object (String).
     - Names do not need to be unique, with one exception: no object may be given the same name as an existing Player object, to prevent impersonation.
 - `type`: A type value (Player, Room, Action, Item, Script). This is set at creation and cannot be modified.
