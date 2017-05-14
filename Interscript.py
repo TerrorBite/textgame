@@ -2,10 +2,14 @@
 Interscript is a lisp-like substitution language.
 """
 
+import sys
 import re
 from functools import wraps
+import inspect
 
-re_interscript = re.compile(ur'{(\[.*?[^\\]\])}')
+re_interscript = re.compile(ur'{(\[.*?[^\\]\]|<.*?[^\\]>)}')
+#re_interscript = re.compile(ur'{(\[.*?[^\\]\])}')
+#re_ivariable = re.compile(ur'{(<.*?[^\\]>)}')
 
 re_special = re.compile(ur'[][<]')
 re_unescape = re.compile(ur'\\([][<>{}\\])')
@@ -18,13 +22,26 @@ class funcHandler:
     """
     Decorator that marks a method as a command handler.
     """
-    def __init__(self, alias, resolve_params=True):
-        self.funcs = [alias]
+    def __init__(self, fname, resolve_params=True):
+        self.fname = fname
         self.resolve = resolve_params
     def __call__(self, f):
         f.resolve = self.resolve
-        for func in self.funcs:
-            funchandlers[func] = f
+        f.name = self.fname
+        funchandlers[self.fname] = f
+
+class InterscriptException(Exception):
+    def __init__(self, *args):
+        super(InterscriptException, self).__init__(*args)
+        frames = inspect.stack()
+        self._head = '    '+[x[0].f_locals['result'].source() for x in frames if x[3] == 'repl'][0]
+        self._stack = [(x['func'].name, '?', '?', x['params'][1:][0].source()) for x in (f[0].f_locals for f in frames if f[3] == 'wrapper')]
+        del frames
+    def __str__(self):
+        try:
+            return '\n'.join([self.args[0], "Interscript traceback (most recent call last):", self._head] + ["  In parameter {0[1]} to {0[0]}:\n    {0[3]}".format(frame) for frame in self._stack[::-1]] + ["{}: {}".format(self.__class__.__name__, self.args[0])] )
+        except Exception as e:
+            return "{}: {}".format( e.__class__.__name__, str(e) )
 
 class ResolvableText(object):
     """
@@ -63,6 +80,7 @@ class ResolvableText(object):
         Any callables embedded within the ResolvableText will be called, and the return value substituted into the string.
         """
         self.resolved = EMPTY.join([x() if callable(x) else x for x in self.parts])
+        print repr(self), "=>", self.resolved
         return self.resolved
 
     def source(self):
@@ -99,10 +117,10 @@ class ResolvableText(object):
         out.append(current_out) # Finalize current_out
 
         # Return list of ResolvableTexts
-        return out            
+        return out
 
 
-def wrap_func(func, params, resolve=True):
+def wrap_func(func, params, resolve, pos):
     """
     Wraps a function, taking a sequence of parameters. Returns the wrapper.
     The wrapper, when called, will resolve any ResolvableText parameters to strings, then call the original function with the resulting parameter list.
@@ -111,13 +129,18 @@ def wrap_func(func, params, resolve=True):
     depth = params[0].depth if isinstance(params[0], Parser) else 0
     #strparams = [p.resolve() if isinstance(p, ResolvableText) else p for p in params]
     #print "{2}Wrapping: {0} with params {1}".format(func.__name__, repr(params), depth*' ')
+    # func.paramsource = ','.join( p.source() if isinstance(p, ResolvableText) else p for p in params[1:])
+
+    # Stores the parameter index it occupies in its parent.
+    func.pos = pos
+
     @wraps(func)
     def wrapper():
-        if resolve:
-            return func(*[p.resolve() if isinstance(p, ResolvableText) else p for p in params])
-        else:
-            #return func(*[p if isinstance(p, ResolvableText) else ResolvableText(p) for p in params])
-            return func(*params)
+            if resolve:
+                return func(*[p.resolve() if isinstance(p, ResolvableText) else p for p in params])
+            else:
+                #return func(*[p if isinstance(p, ResolvableText) else ResolvableText(p) for p in params])
+                return func(*params)
     return wrapper
 
 
@@ -140,6 +163,7 @@ class Parser(object):
         """
         self.player = player
         self.depth = 0
+        self.func_stack = [] # used for exceptions
 
     def parse_prop(self, thing, propname, action, arg):
         """
@@ -156,6 +180,7 @@ class Parser(object):
         """
         Parses an arbitrary string for Interscript.
         """
+        self.stack = []
 
         def repl(match):
             """
@@ -163,7 +188,7 @@ class Parser(object):
             """
             #print 'Parsing string'
             # Parse into a ResolvableText
-            result, resultlen = self._parse_text(match.group(1))
+            result, resultlen = self._parse_text(match.group(1), match.start())
             # Resolve the text and return the string
             #print 'Resolving parsed string'
             return result.resolve()
@@ -171,35 +196,39 @@ class Parser(object):
         return re_interscript.sub(repl, string)
 
     #@depth_meter #TODO: Debug decorator, remove this
-    def _parse_func(self, source):
+    def _parse_func(self, source, pos):
         """
         Parses a function.
         Returns (callable, length_consumed).
         """
+        #self.stack.append(re.split(r'[:\]]', source)[0]+":...]")
         assert source[0] == '['
 
         m = re_funcname.match(source)
         funcname = m.group(1)
         consumed = m.end()
 
-        if funcname not in funchandlers:
-            raise Exception("Unknown function")
-
         params = []
         if m.group(2) == ':':
             # If the function name is terminated by a : then it has parameters
-            params, paramslen = self._parse_text(source[consumed:])
+            params, paramslen = self._parse_text(source[consumed:], pos+consumed)
             params = params.split(',') # Split ResolvableText into several by commas
             consumed += paramslen
         # we're now at the end of the function
 
         # Wrap the function and return it
-        func = funchandlers[funcname]
-        func = wrap_func(func, [self]+params, func.resolve)
+        if funcname not in funchandlers:
+            # No such function. Wrap a func that will raise an exception when run
+            def unknown_function(*args, **kwargs):
+                raise InterscriptException("Unknown function: {}".format(funcname), self.func_stack)
+            func = unknown_function
+        else:
+            func = funchandlers[funcname]
+            func = wrap_func(func, [self]+params, func.resolve, pos)
         func.source = source[:consumed]
         return func, consumed
 
-    def _parse_text(self, source):
+    def _parse_text(self, source, pos=0):
         """
         Parses text, looking for functions.
         Returns (ResolvableText, length_consumed).
@@ -228,7 +257,7 @@ class Parser(object):
                 return text, consumed + 1 # Add one to consume the closing ]
             elif char == '[':
                 # We found a function! Parse it
-                part, partlen = self._parse_func(source)
+                part, partlen = self._parse_func(source, pos+consumed)
             elif char == '<':
                 # We found a variable! Parse it
                 part, partlen = self._parse_var(source)
@@ -329,8 +358,11 @@ if __name__ == '__main__':
             "{[null]}",
             "This string contains {[cat:some, ,Interscript]}.",
             "This is {[cat:nested,[name:#925][null:This text is invisible] ,Interscript]}!",
+            "This is {[lit:nested,[name:#925][null:This text is invisible] ,Interscript]}!",
+            "{[lit:Hello, is it me you're looking for?]}",
             "I am {<me>}.",
             "I am {[cat:<me>]}.",
+            #"This function doesn't exist: {[cat:[null:[foo]]]}."
             ]
     #test_strings.append(' '.join(test_strings))
 
