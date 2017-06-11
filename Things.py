@@ -3,6 +3,7 @@ import time
 
 class NotLoaded:
     # Unique value to represent "not loaded"
+    #TODO: Nothing seems to use this class, so delete it and see what breaks.
     pass
 
 class Thing(object):
@@ -190,7 +191,7 @@ class Player(Thing):
 class Room(Thing):
     """
     A Room is an object whose primary purpose is to contain other objects.
-    It """
+    """
     #def contents(self):
         #pass
 
@@ -205,7 +206,7 @@ class Item(Thing):
 
 class Action(Thing):
     """Aaaaaaaaaaaaaa"""
-    # ^ I was either drunk or really tired when I wrote this code
+    # ^ I was either drunk or really tired when I wrote this code. TODO: Documentation
 
     def use(self, user):
         # NOTE: What does it mean to "use" an item? Is this item-defined? Check spec

@@ -14,7 +14,7 @@ State = enum('New', 'LoggedIn')
 
 prelogincmds = []
 commands = {}
-class commandHandler:
+class commandHandler(object): # Decorator
     """
     Decorator that marks a method as a command handler.
     """
@@ -28,7 +28,7 @@ class commandHandler:
             for cmd in self.cmds:
                 prelogincmds.append(cmd)
 
-class commandHelpText:
+class commandHelpText(object): # Decorator
     """
     Decorator that easily lets help text be specified on a command.
     """
@@ -39,6 +39,7 @@ class commandHelpText:
         return f
 
 class IUserProtocol(Interface):
+    #TODO: Document this interface.
     def write_line(line):
         """
         Sends a complete line of text to the user.
@@ -70,13 +71,21 @@ class User(object):
         self.state = State.New
 
     def send_message(self, msg):
+        """
+        Sends a line of text to the user, using the underlying transport.
+        """
         self.transport.write_line(msg.encode('utf8'))
 
     def run_command(self, msg):
         """
         Runs a command as this User's currently active character.
+
+        This method is intended to allow another object (or player) to "force" this player to do something, like a puppet. 
         """
-        pass
+        #TODO: Implement User.run_command()
+        # How should this differ from process_line()? What constitutes a "command"?
+        # Should this disallow @-commands or allow only actions?
+        self.process_line(msg) # just do this for now
 
     # Commands
 
@@ -120,8 +129,9 @@ class User(object):
     @commandHelpText("Debugging commands for admin use only.")
     def cmd_debug(self, params):
         """
-        This command exists for debugging purposes and
-        is restricted to the admin user.
+        This command exists for debugging purposes and is restricted to the admin user.
+
+        Various sub-commands may exist depending on the needs of a developer.
         """
         if self.player.id != 1:
             self.send_message("You're not allowed to do that.")
@@ -307,7 +317,7 @@ class User(object):
                 if thing.id == 0: break
                 else: thing = thing.parent
 
-        # Command dispatch map. Most commands should be accessed this way.
+        # Command dispatch map. Built-in commands should be accessed this way.
         if words[0] in commands.keys():
             try:
                 log(LogLevel.Debug, "{0} running command: {1}{2}".format(
@@ -358,12 +368,14 @@ class SSHUser(avatar.ConchUser, User):
         """
         Called when a shell is opened by a user logging in via SSH or similar.
         """
-        # Create an SSHProtocol object and connect it
+        # Obtain a protocol instance. This is our custom Network.SSHServerProtocol.
+        # The protocol controls the way that data is sent and received down the connection.
+        # In our case, it presents a TTY-based user interface to the user, while all we care
+        # about is sending lines to the user and receiving lines from them.
         from Network import SSHServerProtocol
-        #self.transport = t = insults.ServerProtocol(SSHProtocol, self, *self.savedSize)
-        self.transport = t = SSHServerProtocol(self, *self.savedSize)
-        t.makeConnection(trans)
-        trans.makeConnection(session.wrapProtocol(t))
+        self.transport = proto = SSHServerProtocol(self, *self.savedSize)
+        proto.makeConnection(trans)
+        trans.makeConnection(session.wrapProtocol(proto))
         #self.send_message("Hi there!")
         self.player = self.world.get_thing(self.world.db.get_player_id(self.username))
         self.complete_login()

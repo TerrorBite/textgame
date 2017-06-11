@@ -1,9 +1,10 @@
 from twisted.cred.checkers import ICredentialsChecker
-from zope.interface import implements
+from twisted.conch.checkers import IAuthorizedKeysDB
+from zope.interface import implementer
 
 from abc import *
 
-import hashlib, struct, random, time
+import hashlib, struct, random, time, functools
 
 from Things import *
 from Util import enum, log, LogLevel
@@ -22,7 +23,18 @@ for t in thingtypes:
 def Thing_of_type(dbtype):
     return thingtypes[dbtype.value()]
 
-active = True
+
+def require_connection(f):
+    """
+    Decorator for the Database class that will raise DatabaseNotConnected
+    if the decorated method is called without the database connected.
+    """
+    @functools.wraps(f)
+    def wrapper(self, *args, **kwargs):
+        if not hasattr(self, "active"): self.active = False
+        if not self.active: raise DatabaseNotConnected()
+        f(self, *args, **kwargs)
+    return wrapper
 
 class DatabaseNotConnected(Exception):
     pass
@@ -37,28 +49,41 @@ class Database(object):
 
         Derived classes must override all abstract methods (the _db_* methods) before they can be instantiated.
         """
-        pass
+        self.active = false
 
     def create_hash(self, password):
         """
         Create a password hash and matching salt for the first time.
+
+        Returns the generated hash and the salt used to generate it, both in
+        hexadecimal form suitable for storing in a database.
         """
         salt = struct.pack('Q', random.getrandbits(64))
-        pwhash = self.hash_pass(password, salt)
+        pwhash = self.hash_pass(password, salt).encode('hex_codec')
         return pwhash, salt.encode('hex_codec')
 
     def hash_pass(self, password, salt):
         """
         Compute a password hash given a plaintext password and a binary salt value.
-        """
-        return hashlib.sha1("{0}{1}".format(salt, hashlib.sha1(password).digest())).hexdigest()
 
+        This is currently derived using RSA PBKDF2 with 4096 rounds of HMAC-SHA1. This method is
+        almost identical to that used by WPA2-PSK wireless networks. Returns a 32-byte hash.
+
+        Returns the raw bytes of the hash as a string. Use str.encode('hex_codec') to get hexadecimal.
+        """
+        # Legacy sha1 method: deprecated
+        #return hashlib.sha1("{0}{1}".format(salt, hashlib.sha1(password).digest())).hexdigest()
+
+        # New method: RSA PBKDF2 (Password-Based Key Derivation Function 2) using HMAC-SHA256
+        return hashlib.pbkdf2_hmac("sha1", password, salt, 4096, 32)
+
+    @require_connection
     def player_login(self, username, password):
         """
         Verifies a player login. Returns -1 if login failed, or a database ID if successful.
-        Password may be None to locate a player by username without verifying 
+        
+        TODO: Incorporate multiple character support. Will return True or False instead of character ID.
         """
-        if not active: raise DatabaseNotConnected()
 
         log(LogLevel.Trace, "Verifying salted sha1 password hash for user {0}, password {1} (redacted)".format(username, '*'*len(password)))
         result = self._db_get_user(username)
@@ -67,21 +92,31 @@ class Database(object):
             return -1
         pwhash, salt, obj = result
         log(LogLevel.Trace, "Successfully retrieved hash={0}, salt={1}, obj={2} from database".format(pwhash, salt, obj))
-        ret = obj if pwhash == self.hash_pass(password, salt.decode('hex_codec')) else -1
+        ret = obj if pwhash.decode('hex_codec') == self.hash_pass(password, salt.decode('hex_codec')) else -1
         if ret == -1: 
             log(LogLevel.Debug, "Password hash mismatch for user {0}".format(username))
         return ret
 
+    @require_connection
+    def get_player_characters(self, username):
+        """
+        Retrieves a set of Player object IDs along with the name of that character.
+        """
+        pass
+
+    @require_connection
     def get_player_id(self, username):
         result = self._db_get_user(username)
         return result[2] if result else None
 
+    @require_connection
     def get_property(self, obj, key):
         """
         Fetches a property value of an object in the database.
         """
         return self._db_get_property(obj, key)
 
+    @require_connection
     def set_property(self, obj, key, value):
         """
         Sets a property value of an object in the database.
@@ -90,6 +125,7 @@ class Database(object):
         """
         self._db_set_property(obj, key, value)
 
+    @require_connection
     def close(self):
         """
         Closes the database connection. After calling this method, the instance will become unusable.
@@ -98,11 +134,11 @@ class Database(object):
         self._db_close()
         self.active = False
 
+    @require_connection
     def load_object(self, world, obj):
         """
         Loads and returns an object out of the database.
         """
-        if not active: raise DatabaseNotConnected()
 
         result = self._db_load_object(obj)
         try:
@@ -117,18 +153,18 @@ class Database(object):
         log(LogLevel.Debug, "Database.load_object(): Returning {0}".format(repr(newobj)))
         return newobj
 
+    @require_connection
     def save_object(self, thing):
         """
         Saves a modified object back to the database.
         """
-        if not active: raise DatabaseNotConnected()
+        if not self.active: raise DatabaseNotConnected()
         log(LogLevel.Trace, "Saving {0} to the database...".format(thing))
         assert thing is not None, "Cannot save None!"
         self._db_save_object(thing)
 
+    @require_connection
     def get_contents(self, obj):
-        if not active: raise DatabaseNotConnected()
-
         return self._db_get_contents(obj)
 
 
@@ -137,12 +173,12 @@ class Database(object):
         DEPRECATED.
         """
         raise NotImplementedError("Due to database alterations, this method has been removed.")
-        if not active: raise DatabaseNotConnected()
 
         result = self.db_get_messages(obj)
         if result is None: return (None, None, None, None, None)
         return result
 
+    @require_connection
     def new_object(self, objtype, name, parent, owner):
         """
         Initializes a new database object, returning the database ID of the object.
@@ -284,14 +320,17 @@ class Database(object):
 
 from twisted.internet import defer
 from twisted.cred import credentials, error as cred_error
+
+@implementer(ICredentialsChecker)
 class CredentialsChecker(object):
-    implements(ICredentialsChecker)
     credentialInterfaces = (credentials.IUsernamePassword,)
 
     def __init__(self, database):
+        log(LogLevel.Trace, "CredentialsChecker created")
         self.db = database
 
     def requestAvatarId(self, credentials):
+        log(LogLevel.Trace, "Asked to check credentials for {0}".format(credentials.username))
         try:
             user = credentials.username
             if self.db.player_login(user, credentials.password) == -1:
@@ -311,3 +350,15 @@ if __name__ == '__main__':
     log(LogLevel.Info, "Test failed password check: " + repr(d.check_pass('admin', 'wrongpass')))
 
     d.close()
+
+@implementer(IAuthorizedKeysDB)
+class AuthorizedKeystore(object):
+    def __init__(self, database):
+        """
+        Provides SSH Authorized Keys from the database.
+        """
+        self.db = database
+        
+    def getAuthorizedKeys(self, username):
+        #TODO: Implement this
+        pass

@@ -146,3 +146,27 @@ def pip_install(*packages):
     result = pip.main(['install']+list(packages))
     return result==0
 
+def super_init(*args, **kwargs):
+    """
+    When called from within a class __init__ function, will call the __init__ of the FIRST parent class only.
+    """
+    "The frame that called us."
+    caller = inspect.currentframe().f_back
+    if caller.f_code.co_name == "__init__":
+        if caller.f_code.co_argcount < 1: return # bail if caller takes no args (init must take at least one)
+        self = caller.f_locals[caller.f_code.co_varnames[0]] # Self is the first argument (regardless of name)
+        if not isinstance(caller.f_locals[caller.f_code.co_varnames[0]], object): return # Bail if first arg is not an instance
+
+        # How many levels down the inheritance tree are we?
+        stack = [x[0] for x in inspect.stack() if x[3] == "__init__"]
+        # Count only frames where the first argument is the "self" object we know
+        ctors = [frame for frame in stack if frame.f_code.co_argcount>0 and frame.f_locals[frame.f_code.co_varnames[0]] is self]
+        #print repr(ctors)
+
+        cls = self.__class__
+        for _ in ctors:
+            # Traverse back up the base classes until we reach the right level
+            cls = cls.__bases__[0]
+        cls.__init__(self, *args, **kwargs)
+        import code
+        code.interact(local=locals())

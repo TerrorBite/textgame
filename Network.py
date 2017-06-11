@@ -22,7 +22,7 @@ class BareUserProtocol(protocol.Protocol):
     Processes a basic user session - a raw connection with no UI presented to the user.
     """
 
-    # TODO: Move BasicUserSession code in here
+    # TODO: This code needs to be completely rewritten.
 
     def __init__(self, user=None):
         self.user = user
@@ -50,9 +50,8 @@ class BareUserProtocol(protocol.Protocol):
 
 class BasicUserSession(protocol.Protocol):
     """
-    Basic user session. TODO: Expand this docstring
+    This code is non-functional. Do not use it.
     """
-    #TODO: Is this still used?
     def __init__(self, avatar=None):
         self.player = None
         self.buf = ''
@@ -151,7 +150,7 @@ def SSHFactoryFactory(world):
         """
         Factory responsible for generating SSHSessions.
 
-        This SSHFactory is functionaly identical to the built-in Conch
+        This SSHFactory is functionally identical to the built-in Conch
         SSHFactory, but is pre-configured with our SSH host keys.
 
         We also configure the SSHFactory with the services we are providing.
@@ -182,22 +181,27 @@ class UserAuthService(userauth.SSHUserAuthServer):
         self.interfaceToMethod[iface] = u'keyboard-interactive'
         userauth.SSHUserAuthServer.serviceStarted(self)
 
+@implementer(IUserProtocol)
 class SSHServerProtocol(insults.ServerProtocol):
-    implements(IUserProtocol)
+    """
+    A terminal transport, which supports our custom terminal protocol.
+    """
     def __init__(self, user, width=80, height=24):
         insults.ServerProtocol.__init__(self, SSHProtocol, user, width, height)
     
-    def write_line(self, line):
+    def write_line(self, line): # Specified by IUserProtocol
         if self.terminalProtocol:
             self.terminalProtocol.write_line(line)
 
-    def resize(self, width, height):
+    def resize(self, width, height): # Specified by IUserProtocol
         if self.terminalProtocol:
             self.terminalProtocol.terminalSize(width, height)
 
 
 class SSHProtocol(recvline.HistoricRecvLine):
     """
+    A terminal protocol, with a separate editing area and display area.
+
     Presents a user interface for sending and receiving text.
     """
 
