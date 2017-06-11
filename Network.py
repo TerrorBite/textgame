@@ -176,6 +176,11 @@ def SSHFactoryFactory(world):
     return SSHFactory()
     # End of SSH host key loading code
 
+class UserAuthService(userauth.SSHUserAuthServer):
+    def serviceStarted(self):
+        #need keyboard-interactive interface to exist
+        self.interfaceToMethod[iface] = u'keyboard-interactive'
+        userauth.SSHUserAuthServer.serviceStarted(self)
 
 class SSHServerProtocol(insults.ServerProtocol):
     implements(IUserProtocol)
