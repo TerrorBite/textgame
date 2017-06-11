@@ -6,9 +6,10 @@ log(LogLevel.Info, "Loading...")
 try:
     from twisted.internet import reactor, protocol, task
 except ImportError as e:
-    log(LogLevel.Warn, "Failed to load Twisted Framework. Will try and install it...")
+    log(LogLevel.Warn, "Failed to load Twisted Framework.")
+    # Ask the user politely about these packages
     if pip_install('twisted', 'cryptography') == False:
-        log(LogLevel.Fatal, "Failed to install Twisted. Giving up.")
+        log(LogLevel.Fatal, "Cannot continue without the Twisted framework installed.")
         import traceback
         traceback.print_exc()
         exit(1)

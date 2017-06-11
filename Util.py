@@ -111,19 +111,19 @@ Definitions:
 """
 LogLevel = enum('Trace', 'Debug', 'Info', 'Notice', 'Warn', 'Error', 'Fatal')
 
-loglevel = LogLevel.Info
+_loglevel = LogLevel.Info
 
 def setLogLevel(level):
     "Sets the logging level."
-    global loglevel
-    loglevel = level
+    global _loglevel
+    _loglevel = level
 
 import sys
 def log(level, message):
-    if level < loglevel:
+    if level < _loglevel:
         #print level, loglevel
         return
-    if loglevel <= LogLevel.Debug:
+    if _loglevel <= LogLevel.Debug:
         frm = inspect.stack()[1]
         mod = inspect.getmodule(frm[0])
         sys.stdout.write("{0} [{1}/{3}] {2}\r\n".format(time.strftime('[%H:%M:%S]'),
@@ -136,11 +136,11 @@ def pip_install(*packages):
     try:
         import pip
     except ImportError as e:
-        log(LogLevel.Error, "pip is not installed")
+        log(LogLevel.Error, "The following packages are required:\r\n    {0}".format(join(packages)))
         return False
 
     if pip.utils.ask("The following packages are required:\r\n    {0}\r\n"\
-            "Do you want to install them now using pip? (yes/no): "
+            "Do you want me to install them locally using pip? (yes/no): "
             .format(', '.join(packages)) , ['yes', 'no']) == 'no': return False
 
     result = pip.main(['install']+list(packages))

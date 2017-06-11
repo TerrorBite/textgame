@@ -119,6 +119,7 @@ def SSHFactoryFactory(world):
     be set this way.
 
     Second, this allows us to create a separate SSHFactory per world, should we ever
+    run more than one world on a single server.
     """
 
     import os, sys
@@ -154,9 +155,10 @@ def SSHFactoryFactory(world):
         SSHFactory, but is pre-configured with our SSH host keys.
 
         We also configure the SSHFactory with the services we are providing.
-        In this case we are using the built-in Conch SSHUserAuthServer to
-        authenticate users, and the built-in SSHConnection class to handle
-        incoming connections. These built-in classes are configured via the
+        In this case we are using our UserAuthService (a subclass of the
+        built-in Conch SSHUserAuthServer) to authenticate users, and the
+        built-in SSHConnection class to handle incoming connections.
+        The built-in classes are configured via the
         Portal that is stored in the portal attribute.
         """
         publicKeys = {
@@ -166,11 +168,14 @@ def SSHFactoryFactory(world):
                 'ssh-rsa': keys.Key.fromString(data=privateKey)
                 }
         services = {
-                'ssh-userauth': userauth.SSHUserAuthServer,
+                'ssh-userauth': UserAuthService,
                 'ssh-connection': connection.SSHConnection
                 }
-        # This Portal tells us how to authenticate users
-        portal = Portal(SSHRealm(world), [Database.CredentialsChecker(world.db)])
+        # This Portal tells us how to authenticate users.
+        # The SSHRealm will generate user instances after auth succeeds.
+        # The Database.CredentialsChecker can verify a username and password
+        # pair against the database.
+        portal = Portal(SSHRealm(world), [Database.CredentialsCecker(world.db)])
 
     return SSHFactory()
     # End of SSH host key loading code
