@@ -1,4 +1,4 @@
-from zope.interface import implements
+from zope.interface import implements, implementer
 from twisted.conch.interfaces import IConchUser
 
 from twisted.internet import protocol
@@ -175,7 +175,7 @@ def SSHFactoryFactory(world):
         # The SSHRealm will generate user instances after auth succeeds.
         # The Database.CredentialsChecker can verify a username and password
         # pair against the database.
-        portal = Portal(SSHRealm(world), [Database.CredentialsCecker(world.db)])
+        portal = Portal(SSHRealm(world), [Database.CredentialsChecker(world.db)])
 
     return SSHFactory()
     # End of SSH host key loading code

@@ -136,7 +136,7 @@ def pip_install(*packages):
     try:
         import pip
     except ImportError as e:
-        log(LogLevel.Error, "The following packages are required:\r\n    {0}".format(join(packages)))
+        log(LogLevel.Error, "The following packages are required:\r\n    {0}".format(', '.join(packages)))
         return False
 
     if pip.utils.ask("The following packages are required:\r\n    {0}\r\n"\
