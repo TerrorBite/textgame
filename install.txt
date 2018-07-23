@@ -1,0 +1,19 @@
+For installation on a Debian-like system:
+
+You will need:
+- Python 2.7.x
+- The python-twisted package
+
+That should be it!
+
+If you want to use pip packages, e.g. installing into
+a virtualenv, then you'll need:
+- pip
+- A compiler that pip can use
+- libcrypt-dev libffi-dev openssl-dev python2-dev
+
+Install the following pip packages:
+    cryptography pyasn1 twisted
+
+
+All done!
