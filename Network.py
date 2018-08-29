@@ -27,6 +27,7 @@ class BareUserProtocol(protocol.Protocol):
     def __init__(self, user=None):
         self.user = user
         self.buf = ''
+        self.sshmode = False
 
     def connectionMade(self):
         h = self.transport.getHost()
@@ -183,7 +184,7 @@ def SSHFactoryFactory(world):
 class UserAuthService(userauth.SSHUserAuthServer):
     def serviceStarted(self):
         #need keyboard-interactive interface to exist
-        self.interfaceToMethod[iface] = u'keyboard-interactive'
+        #self.interfaceToMethod[iface] = u'keyboard-interactive'
         userauth.SSHUserAuthServer.serviceStarted(self)
 
 @implementer(IUserProtocol)
