@@ -7,6 +7,7 @@ from twisted.conch import avatar, recvline
 from twisted.conch.insults import insults
 from twisted.conch.ssh import factory as conch_factory, userauth, connection, keys, session
 from twisted.conch.ssh.address import SSHTransportAddress
+from twisted.conch.ssh.common import NS, getNS
 
 from Util import log, LogLevel, enum
 
@@ -181,11 +182,43 @@ def SSHFactoryFactory(world):
     return SSHFactory()
     # End of SSH host key loading code
 
-class UserAuthService(userauth.SSHUserAuthServer):
+class UserAuthService(service.SSHService):
+    #Here, we completely customise the SSH login experience.
+
+    # Name of this SSH service.
+    name = "ssh-userauth"
+
     def serviceStarted(self):
+        pass
         #need keyboard-interactive interface to exist
         #self.interfaceToMethod[iface] = u'keyboard-interactive'
-        userauth.SSHUserAuthServer.serviceStarted(self)
+        #import code
+        #code.interact(local=locals())
+        #userauth.SSHUserAuthServer.serviceStarted(self)
+    def ssh_USERAUTH_REQUEST(self, packet):
+        """
+        This method is called when a packet is received.
+        The client has requested authentication.  Payload::
+            string user
+            string next service
+            string method
+            <authentication specific data>
+        @type packet: L{bytes}
+        """
+        user, nextService, method, rest = getNS(packet, 3)
+        if user != self.user or nextService != self.nextService:
+            self.authenticatedWith = [] # clear auth state
+        self.user = user
+        self.nextService = nextService
+
+        if method == "publickey":
+            self.auth_pubkey( rest );
+        elif method == "password":
+            # do the auth if user account exists
+            # but in all cases, reject with partial success
+            # and with can continue of interactive
+        elif method == "keyboard-interactive":
+
 
 @implementer(IUserProtocol)
 class SSHServerProtocol(insults.ServerProtocol):
