@@ -1,13 +1,11 @@
 from zope.interface import implements, implementer
-from twisted.conch.interfaces import IConchUser
 
 from twisted.internet import protocol
-from twisted.cred import portal
 from twisted.conch import avatar, recvline
 from twisted.conch.insults import insults
-from twisted.conch.ssh import factory as conch_factory, userauth, connection, keys, session
+from twisted.conch.ssh import factory as conch_factory
+from twisted.conch.ssh import userauth, connection, keys, session
 from twisted.conch.ssh.address import SSHTransportAddress
-from twisted.conch.ssh.common import NS, getNS
 
 from Util import log, LogLevel, enum
 
@@ -16,6 +14,7 @@ import string
 import World
 import Things
 from User import SSHUser, IUserProtocol, State
+from Auth import SSHRealm, UserAuthService
 
 class BareUserProtocol(protocol.Protocol):
     implements(IUserProtocol)
@@ -81,29 +80,6 @@ class BasicUserSession(protocol.Protocol):
             except:
                 log(LogLevel.Info, "<UNKNOWN> {0} lost connection: {1}".format(self.host, data.getErrorMessage()))
 
-
-
-
-
-class SSHRealm:
-    """
-    This simple realm generates User instances.
-
-    This is basically a factory for SSHUser instances. After SSH authentication
-    has succeeded, the SSHRealm is provided with the username of the account that
-    just logged in, and uses it to create and return an appropriate User instance.
-    """
-    implements(portal.IRealm)
-
-    def __init__(self, world):
-        self.world = world
-
-    def requestAvatar(self, avatarId, mind, *interfaces):
-        if IConchUser in interfaces:
-            return interfaces[0], SSHUser(self.world, avatarId), lambda: None
-        else:
-            log(LogLevel.Error, "SSHRealm: No supported interfaces")
-            raise NotImplementedError("No supported interfaces found.")
 
 
 def SSHFactoryFactory(world):
@@ -181,43 +157,6 @@ def SSHFactoryFactory(world):
 
     return SSHFactory()
     # End of SSH host key loading code
-
-class UserAuthService(service.SSHService):
-    #Here, we completely customise the SSH login experience.
-
-    # Name of this SSH service.
-    name = "ssh-userauth"
-
-    def serviceStarted(self):
-        pass
-        #need keyboard-interactive interface to exist
-        #self.interfaceToMethod[iface] = u'keyboard-interactive'
-        #import code
-        #code.interact(local=locals())
-        #userauth.SSHUserAuthServer.serviceStarted(self)
-    def ssh_USERAUTH_REQUEST(self, packet):
-        """
-        This method is called when a packet is received.
-        The client has requested authentication.  Payload::
-            string user
-            string next service
-            string method
-            <authentication specific data>
-        @type packet: L{bytes}
-        """
-        user, nextService, method, rest = getNS(packet, 3)
-        if user != self.user or nextService != self.nextService:
-            self.authenticatedWith = [] # clear auth state
-        self.user = user
-        self.nextService = nextService
-
-        if method == "publickey":
-            self.auth_pubkey( rest );
-        elif method == "password":
-            # do the auth if user account exists
-            # but in all cases, reject with partial success
-            # and with can continue of interactive
-        elif method == "keyboard-interactive":
 
 
 @implementer(IUserProtocol)

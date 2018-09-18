@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from Util import log, LogLevel, setLogLevel, pip_install
 setLogLevel(LogLevel.Trace)
 

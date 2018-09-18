@@ -47,7 +47,7 @@ def enum(*args, **named):
     h = hash(repr(sorted(prenums, key=lambda x: x[1])))
 
     def factory(n, s, h):
-        class EnumValue:
+        class EnumValue(enum.EnumValue):
             __slots__ = []
             __name__ = s
             _hash = h
@@ -63,14 +63,14 @@ def enum(*args, **named):
             def __getitem__(self, x):
                 return (s, n)[x]
             def __hash__(self): return h+n
-            def __eq__(self, other): return other is self or n.__eq__(other)
+            def __eq__(self, other): return other is self or other == n
             def name(self): return s
             def value(self): return n
         return EnumValue
 
     enums = dict(map(lambda x: (x[0], factory(x[1], x[0], h)()), prenums))
 
-    t = type('Enum', (), enums)
+    t = type("Enum", (enum.Enum,), enums)
     lookup = dict(map(lambda x: (x[1], x[0]), prenums))
     def Enum(self, s):
         if type(s) is str:
@@ -81,14 +81,22 @@ def enum(*args, **named):
             if s in lookup:
                 return getattr(t, lookup[s])
             else: raise IndexError("No such numeric value in this enumeration")
+        elif type(s) is enum.EnumValue:
+            if s in enums.values():
+                return s
+            else: raise IndexError("No such value in this enumeration")
         raise TypeError("Expected int or string")
     setattr(t, '__call__', Enum)
     _repr = 'enum({0})'.format(', '.join(repr(x) for x in sorted(enums, key=enums.get)))
     setattr(t, '__repr__', lambda self: _repr )
+    setattr(t, '__contains__', lambda self, y: y in lookup or y in lookup.values() or y in enums.values() )
     setattr(t, '__getitem__', Enum)
     def _setattr(self, x, y): raise AttributeError('Enumerations are read-only')
     setattr(t, '__setattr__', _setattr)
     return t()
+
+setattr(enum, "EnumValue", type("enum.EnumValue", (), {}))
+setattr(enum, "Enum", type("enum.Enum", (), {}))
 
 """
 This enum defines log levels.
@@ -123,14 +131,19 @@ def log(level, message):
     if level < _loglevel:
         #print level, loglevel
         return
+    log_level_name = level.name().upper() if isinstance(level, enum.EnumValue) else "OTHER"
     if _loglevel <= LogLevel.Debug:
         frm = inspect.stack()[1]
         mod = inspect.getmodule(frm[0])
         sys.stdout.write("{0} [{1}/{3}] {2}\r\n".format(time.strftime('[%H:%M:%S]'),
-            level.name().upper(), message, mod.__name__) )
+            log_level_name, message, mod.__name__) )
     else:
         sys.stdout.write("{0} [{1}] {2}\r\n".format(time.strftime('[%H:%M:%S]'),
-            level.name().upper(), message) )
+            log_level_name, message) )
+
+# Handy aliases: log.warn(), log.error(), etc
+for level in LogLevel:
+    setattr(log, level.name().lower(), log.__get__(level, level.__class__))
 
 def pip_install(*packages):
     try:
