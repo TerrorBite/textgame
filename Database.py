@@ -78,6 +78,13 @@ class Database(object):
         return hashlib.pbkdf2_hmac("sha1", password, salt, 4096, 32)
 
     @require_connection
+    def user_exists(self, username):
+        """
+        Checks whether an account exists.
+        """
+        return self._db_get_user(username) is not None
+
+    @require_connection
     def player_login(self, username, password):
         """
         Verifies a player login. Returns -1 if login failed, or a database ID if successful.

@@ -35,6 +35,12 @@ class SSHRealm:
 
 
 class DebugSSHService(service.SSHService):
+    """
+    This replacement for the Conch SSHService simply logs
+    a debug message for every packet received, with no
+    changes in functionality. Used to debug subclasses of
+    the Conch SSHService.
+    """
     def packetReceived(self, messageNum, packet):
         log.trace("{0}: packet {1} ({2}): {3}".format(
             self.name, messageNum, self.protocolMessages[messageNum], repr(packet)
@@ -43,6 +49,25 @@ class DebugSSHService(service.SSHService):
 
 
 class UserAuthService(DebugSSHService):
+    """
+    The UserAuthService replaces the standard SSH authentication
+    service. This service customises the login experience in the
+    following ways:
+
+    - Unknown usernames are not rejected, instead, the
+      keyboard-interactive method is used to offer the user a
+      chance to register an account.
+    - Unknown users who offered an SSH pubkey during authentication
+      will be asked if they wish to use that key to authenticate in future.
+    - Known users will be authenticated via pubkey, password, or
+      keyboard-interactive.
+    - Known users will be asked which character they want to play.
+    
+    Additionally:
+    - On the internet, bots constantly attempt to brute-force SSH
+      server passwords. This service may include defences against
+      such connections.
+    """
     #Here, we completely customise the SSH login experience.
 
     # Name of this SSH service.
@@ -74,6 +99,8 @@ class UserAuthService(DebugSSHService):
         user, nextService, method, rest = getNS(packet, 3)
         if user != self.user or nextService != self.nextService:
             self.authenticatedWith = [] # clear auth state
+            log.debug(dir(self.transport.factory.portal))
+            self.new_user = self.transport.factory.portal.realm.world.db.user_exists(user)
         self.user = user
         self.nextService = nextService
 
