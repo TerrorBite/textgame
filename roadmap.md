@@ -2,9 +2,9 @@
 
 This is the roadmap for this project.
 
-## Current Status
+## Initial Status
 
-First we need to assess the current status of the project in terms of features.
+Since this roadmap was written part way through development, I first want to assess the status of the project in terms of features, as of the time this roadmap was written.
 
 ### Database
 
@@ -61,6 +61,32 @@ There is currently no implementation for this type of scripting.
 
 ## Version 0.1
 
-With the current status laid out, here is what needs to be implemented to create a 0.1 release:
+With the starting status laid out, here is what I want to see implemented in a 0.1 milestone:
+
+### Database
+
+Some changes will be needed here to support other changes. In particular, schema changes to allow multiple characters per account, and to allow for the storing of account preferences and SSH public keys.
+
+### Network
+
+First, I want to get the authentication rework functional. I want to be able to successfully connect with a new username, set a password, create a character, disconnect, then log back in with my password and use that character.
+
+SSH keys will not be supported at this stage.
+
+Second, I want non-SSH connection to work (for now, plaintext only). This will require a different auth flow.
+
+### Interface (SSH)
+
+No changes.
+
+### World
+
+Commands to create rooms and actions, and to set descriptions. Ability to link actions to rooms, such that rooms can be traversed via the actions.
+
+### Scripting
+
+Support Interscript in object descriptions.
+
+## Version 0.2
 
 *(To Be Completed)*
