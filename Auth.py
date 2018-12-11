@@ -61,6 +61,8 @@ class UserAuthService(DebugSSHService):
 
         self.phase = 0
 
+        self.send_banner("Welcome to this thing")
+
     def ssh_USERAUTH_REQUEST(self, packet):
         """
         This method is called when a packet is received.
@@ -151,6 +153,9 @@ class UserAuthService(DebugSSHService):
             packet += chr(echo)
         self.transport.sendPacket(userauth.MSG_USERAUTH_INFO_REQUEST, packet)
 
+    def send_banner(self, banner):
+        self.transport.sendPacket(userauth.MSG_USERAUTH_BANNER,
+                NS(banner+'\n') + NS("en-US"))
 
     def continueNextAuth(self, remaining):
         # This auth attempt wasn't immediately successful.
