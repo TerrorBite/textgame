@@ -330,6 +330,19 @@ from twisted.cred import credentials, error as cred_error
 
 @implementer(ICredentialsChecker)
 class CredentialsChecker(object):
+    """
+    This class implements the ICredentialsChecker interface.
+
+    When provided with credentials which implement IUsernamePassword,
+    it will check the credentials against the database and respond
+    according to whether the check succeeded.
+
+    This credentials checker is ONLY for checking username and
+    password; for SSH public key authentication, a standard
+    twisted.conch.checkers.SSHPublicKeyChecker should be used
+    in conjunction with our AuthorizedKeystore class.
+    """
+    # We know how to check a username and password
     credentialInterfaces = (credentials.IUsernamePassword,)
 
     def __init__(self, database):
@@ -350,6 +363,11 @@ class CredentialsChecker(object):
             from traceback import print_exc
             print_exc(e)
 
+    def _checkPassword(self, creds):
+        pass
+    def _checkPubkey(self, creds):
+        pass
+
 if __name__ == '__main__':
     d = Database()
     
@@ -360,6 +378,10 @@ if __name__ == '__main__':
 
 @implementer(IAuthorizedKeysDB)
 class AuthorizedKeystore(object):
+    """
+    This class provides a twisted.conch.checkers.SSHPublicKeyChecker
+    with a way to retrieve public keys from our database.
+    """
     def __init__(self, database):
         """
         Provides SSH Authorized Keys from the database.
@@ -367,5 +389,13 @@ class AuthorizedKeystore(object):
         self.db = database
         
     def getAuthorizedKeys(self, username):
+        """
+        Fetches the list of public keys (as instances of
+        twisted.conch.ssh.keys.Key) that are associated
+        with this username.
+        """
         #TODO: Implement this
-        pass
+        # The parameter is the value returned by
+        # ICredentialsChecker.requestAvatarId().
+        log.debug('AuthorizedKeys( "{0}" )'.format(username))
+        return []

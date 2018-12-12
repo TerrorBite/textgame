@@ -28,8 +28,25 @@ class SSHRealm:
         self.world = world
 
     def requestAvatar(self, avatarId, mind, *interfaces):
+        """
+        Requests that this Realm shall provide an "avatarAspect" which implements
+        one of some list of interfaces. What this means for us is that we will
+        create and return an SSHUser instance (which implements IConchUser).
+
+        avatarId: the username which we are getting an instance for.
+        mind: an object that implements a client-side interface for this Realm.
+            In practical terms, this is some object that is provided by our
+
+        interfaces: list of interfaces that the mind is compatible with. In our
+            case this is only ever going to be IConchUser, so we don't really care.
+        """
         if IConchUser in interfaces:
-            return interfaces[0], SSHUser(self.world, avatarId), lambda: None
+            # Return a tuple of (interface, avatarAspect, logout).
+            # interface: one of the interfaces passed in.
+            # avatarAspect: an instance of a class that implements that interface.
+            # logout: a callable which will "detach the mind from the avatar". Spooky.
+            avatar = SSHUser(self.world, avatarId)
+            return interfaces[0], avatar, avatar.logout
         else:
             log.error("SSHRealm: No supported interfaces")
             raise NotImplementedError("No supported interfaces found.")

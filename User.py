@@ -355,11 +355,22 @@ class User(object):
 
 
 class SSHUser(avatar.ConchUser, User):
+    """
+    This is an adaptor on top of the User class which makes it available
+    as an SSH server session. The primary purpose of this class is to connect the
+    SSH transport to our Protocol which travels over that transport.
+
+    Our Protocol is a protocol in the general sense, not the networking sense; it is
+    interfacing with a human rather than client software, so it's actually presenting
+    a text-based user interface across the transport.
+    """
     implements(ISession)
     
     def __init__(self, world, username):
         self.savedSize = ()
-        avatar.ConchUser.__init__(self) # don't change to super(), it will break
+        # Initialize our superclasses.
+        # Don't change these to use super(), it will break
+        avatar.ConchUser.__init__(self)
         User.__init__(self, world, username)
         # what does the following do?
         self.channelLookup.update({'session':session.SSHSession})
@@ -373,27 +384,54 @@ class SSHUser(avatar.ConchUser, User):
         # In our case, it presents a TTY-based user interface to the user, while all we care
         # about is sending lines to the user and receiving lines from them.
         from Network import SSHServerProtocol
+        # Get the protocol instance
+        # (Why is the proto called transport?)
         self.transport = proto = SSHServerProtocol(self, *self.savedSize)
+        # Connect the protocol and the transport together (I don't really understand why
+        # it needs to be connected both ways like this, or what the wrapper does)
         proto.makeConnection(trans)
         trans.makeConnection(session.wrapProtocol(proto))
         #self.send_message("Hi there!")
+        # Obtain the Player object from the database
         self.player = self.world.get_thing(self.world.db.get_player_id(self.username))
+        # Finish login (what does this call do?)
         self.complete_login()
 
     def getPty(self, term, windowSize, modes):
+        """
+        TODO: describe this method
+        """
         if not self.transport:
             self.savedSize = windowSize[1::-1]
         else:
             self.windowChanged(windowSize)
     
     def execCommand(self, proto, cmd):
+        """
+        This method would be called when an attempt is made to run a single
+        command via SSH rather than establishing an interactive session.
+
+        We don't support this, so we raise a NotImplementedError.
+        """
         raise NotImplementedError()
 
     def closed(self):
+        """
+        This method is called when the connection is closed (? Verify this)
+        """
         pass
 
     def eofReceived(self):
+        """
+        This method is called when the end of input is received. Basically
+        if the user has gone away somehow. (?Verify this)
+        """
         pass
 
     def windowChanged(self, newSize):
+        """
+        Called in the case where the user has resized their SSH window.
+        When this happens, we need to tell our protocol so that it can
+        re-render its text-based interface at the new size.
+        """
         self.transport.resize(newSize[1], newSize[0])

@@ -149,11 +149,18 @@ def SSHFactoryFactory(world):
                 'ssh-userauth': UserAuthService,
                 'ssh-connection': connection.SSHConnection
                 }
-        # This Portal tells us how to authenticate users.
+        # This Portal is the conduit through which we authenticate users.
         # The SSHRealm will generate user instances after auth succeeds.
-        # The Database.CredentialsChecker can verify a username and password
-        # pair against the database.
-        portal = Portal(SSHRealm(world), [Database.CredentialsChecker(world.db)])
+        portal = Portal(SSHRealm(world), [
+            # This checker allows the Portal to verify passwords.
+            Database.CredentialsChecker(world.db),
+            # This checker allows the Portal to verify SSH keys.
+            twisted.conch.checkers.SSHPublicKeyChecker(
+                Database.AuthorizedKeystore(world.db)),
+            # This "checker" will create a new user, instead of
+            # authenticating an existing one.
+            Database.NewUserCreator(world.db)
+        ])
 
     return SSHFactory()
     # End of SSH host key loading code
