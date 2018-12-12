@@ -35,8 +35,7 @@ class SSHRealm:
 
         avatarId: the username which we are getting an instance for.
         mind: an object that implements a client-side interface for this Realm.
-            In practical terms, this is some object that is provided by our
-
+            This is an object provided by our UserAuthService, and is always None.
         interfaces: list of interfaces that the mind is compatible with. In our
             case this is only ever going to be IConchUser, so we don't really care.
         """
@@ -116,7 +115,11 @@ class UserAuthService(service.SSHService):
     protocolMessages = userauth.SSHUserAuthServer.protocolMessages
 
     def serviceStarted(self):
-        log.info("{0} service starting".format(self.name) )
+        """
+        Called when the service is started. This service starts automatically
+        as soon as a user connects, in order to authenticate the user.
+        """
+        #log.info("{0} service starting".format(self.name) )
         self.state = None
         self.state_changes = 0
         self.packet_count = 0
@@ -130,12 +133,11 @@ class UserAuthService(service.SSHService):
     def ssh_USERAUTH_REQUEST(self, packet):
         """
         This method is called when a packet is received.
-        The client has requested authentication.  Payload::
+        The client has requested authentication.  Payload:
             string user
             string next service
             string method
-            <authentication specific data>
-        @type packet: L{bytes}
+            [authentication specific data]
         """
         self.packet_count += 1
         user, nextService, method, rest = getNS(packet, 3)
@@ -159,7 +161,7 @@ class UserAuthService(service.SSHService):
             # Username is known to us! Do normal login.
             if first:
                 self.supportedAuthentications = ["publickey",
-                    "keyboard-interactive", "password", "test"]
+                    "keyboard-interactive", "password"]
             return tryAuth( method, rest )
 
         #log.debug(self.supportedAuthentications)
