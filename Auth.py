@@ -94,19 +94,21 @@ class UserAuthService(service.SSHService):
 
     # Name of this SSH service.
     name = "ssh-userauth"
-    supportedAuthentications = ["publickey", "password", "keyboard-interactive"]
+    supportedAuthentications = ["publickey", "keyboard-interactive"]
 
     protocolMessages = userauth.SSHUserAuthServer.protocolMessages
 
     def serviceStarted(self):
         log.info("{0} service starting".format(self.name) )
         self.state = None
+        self.state_changes = 0
+        self.packet_count = 0
 
         # Stores the user's public keys, if they provided any.
         self.seen_keys = []
 
 
-        self.send_banner("Welcome to this thing")
+        self.send_banner("HERE BE DRAGONS!\nThis software is highly experimental. Try not to break it.\nDebug logging is enabled. DO NOT enter any real passwords!\n")
 
     def ssh_USERAUTH_REQUEST(self, packet):
         """
@@ -118,49 +120,61 @@ class UserAuthService(service.SSHService):
             <authentication specific data>
         @type packet: L{bytes}
         """
+        self.packet_count += 1
         user, nextService, method, rest = getNS(packet, 3)
+        first = False
         if self.state is None or self.state.is_invalid( user, nextService ):
             # If username or desired service has changed during auth,
             # the RFC says we must discard all state.
             self.state = UserAuthState( self, user, nextService )
+            # We do keep track of how many state changes there have been.
+            # This is used to thwart bots.
+            self.state_changes += 1
             #log.debug(dir(self.transport.factory.portal))
             self.firstContact()
+            first = True
+        if self.state_changes > 3 or self.packet_count > 20:
+            self.send_disconnect("You are doing that too much!")
 
-        log.debug( "Auth request for user {0}, service {1}, method {2}.".format(user, nextService, method) )
+        #log.debug( "Auth request for user {0}, service {1}, method {2}.".format(user, nextService, method) )
 
+        if self.state.user_is_known:
+            # Username is known to us! Do normal login.
+            if first:
+                self.supportedAuthentications = ["publickey",
+                    "keyboard-interactive", "password", "test"]
+            return tryAuth( method, rest )
+
+        #log.debug(self.supportedAuthentications)
         if method == "publickey":
-            # If user is known, try and do pubkey auth.
-            # If user is not known, store their pubkeys so they can
+            # User is not known, store their pubkeys so they can
             #   use one to register with us.
-            self.auth_pubkey( rest )
             log.debug(  "Pubkey attempt")
-            #return self.continueNextAuth(self.supportedAuthentications)
-            return self.failAuth(self.supportedAuthentications)
-        elif method == "password":
-            # If user account exists, 
-            # but in all cases, reject with partial success
-            # and with can continue of interactive
-            log.debug( "Password attempt")
-            return self.continueNextAuth(self.supportedAuthentications)
+            return self.store_pubkey( rest )
         elif method == "keyboard-interactive":
             log.debug( "Interactive attempt")
             return self.tryKeyboardInteractive(rest)
+        elif method == "password":
+            if not self.state.user_is_known:
+                # We told this client we don't support passwords
+                # but they are ignoring us
+                self.send_disconnect("This auth method is not allowed")
+            else:
+                log.debug( "Denying password attempt".format(method) )
+                self.failAuth(self.supportedAuthentications)
         else:
+            log.debug( "Unknown {0} attempt".format(method) )
             return self.failAuth(self.supportedAuthentications)
     
     def firstContact(self):
         """
         Called the first time a user sends us a userauth request.
         """
-        log.debug("First contact from {0}!".format(self.state.username))
+        known_text = "Known" if self.state.user_is_known else "Unknown"
+        log.info("{0} user {1} is authenticating".format(known_text, self.state.username))
 
     def auth_pubkey(self, pubkey):
         log.debug("Got a pubkey")
-        log.debug(repr(pubkey))
-        initial = bool(pubkey[0])
-        algo, blob, rest = getNS(pubkey[1:], 2)
-        self.seen_keys.append(blob)
-        log.debug( self.key2str(algo, blob) )
 
     def store_pubkey(self, pubkey):
         algo, blob, rest = getNS(pubkey[1:], 2)
@@ -174,7 +188,8 @@ class UserAuthService(service.SSHService):
 
     def tryKeyboardInteractive(self, packet):
         self.askQuestions([
-            ("\033[1mWelcome, \033[34m{0}\033[39m!\033[0m I don't recognise your username.\nWould you like to \033[4mr\033[0megister, proceed as a \033[4mg\033[0muest, or \033[4mq\033[0muit?\n(r/g/q): ".format(self.state.username), False)
+            #("\033[1mWelcome, \033[36m{0}\033[39m!\033[0m I don't recognise your username.\nWould you like to \033[4mr\033[0megister, proceed as a \033[4mg\033[0muest, or \033[4mq\033[0muit?\n(r/g/q): ".format(self.state.username), False)
+            ("Welcome, {0}! I don't recognise your username.\nWould you like to [r]egister, proceed as a [g]uest, or [q]uit?\n(r/g/q): ".format(self.state.username), False)
         ])
 
     def ssh_USERAUTH_INFO_RESPONSE(self, packet):
@@ -196,24 +211,38 @@ class UserAuthService(service.SSHService):
             #d.errback(failure.Failure())
             pass
         else:
+            log.debug( "Responses: {0}".format( repr(resp) ) )
             if self.state.phase == 0:
                 r = resp[0][0].lower()
                 if( r == "r" ):
                     self.state.phase += 1
                     self.askQuestions([
-                        ("Please choose a password: ", True),
-                        ("Please re-enter your password: ", True)
+                        #("You are registering with the username \033[1;36m{0}\033[0m.\nPlease choose a password: ".format(self.state.username), True),
+                        ("You are registering with the username: {0}\nPlease choose a password: ".format(self.state.username), True),
+                        ("Please re-type the password: ", True)
                     ])
                 elif r == "q":
                     self.noAuthLeft("Please come back soon!")
+                elif r == "g":
+                    self.askQuestions([
+                        ("Sorry, guest mode actually isn't implemented yet.\nRegister or quit? (r/q): ", False) ])
+                else:
+                    self.askQuestions([
+                        ("Sorry, I don't understand your input.\nRegister, vidit as guest or quit? (r/g/q): ", False) ])
             elif self.state.phase == 1:
-                self.state.phase += 1
-                self.askQuestions([
-                    ("Choose a name for your first character: ", False)
+                if resp[0] != resp[1]:
+                    self.askQuestions([
+                        ("Those passwords didn't match!\nPlease choose a password: ".format(self.state.username), True),
+                        ("Please re-type the password: ", True)
                     ])
+                else:
+                    self.state.phase += 1
+                    self.askQuestions([
+                        ("Choose a name for your first character: ", False)
+                        ])
             else:
                 #d.callback(resp)
-                log.debug( "Responses: {0}".format( repr(resp) ) )
+                self.send_banner("This has been a test. No actual registration has been made.")
                 self.noAuthLeft("Auth test complete" )
     
     def askQuestions(self, questions):
@@ -226,6 +255,7 @@ class UserAuthService(service.SSHService):
             packet += NS(prompt)
             packet += chr(echo)
         self.transport.sendPacket(userauth.MSG_USERAUTH_INFO_REQUEST, packet)
+        log.debug("Asked the user questions")
 
     def send_banner(self, banner):
         self.transport.sendPacket(userauth.MSG_USERAUTH_BANNER,
@@ -244,6 +274,32 @@ class UserAuthService(service.SSHService):
         self.transport.sendDisconnect(
             transport.DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE,
             msg)
-    def succeedAuth(self):
+
+    def send_disconnect(self, msg):
+        log.info("Disconnecting user {0}".format(self.state.username))
+        self.transport.sendDisconnect(
+            transport.DISCONNECT_HOST_NOT_ALLOWED_TO_CONNECT,
+            msg)
+
+    def succeedAuth(self, service):
         # Authentication has succeeded fully.
-        pass
+        self.transport.sendPacket(MSG_USERAUTH_SUCCESS, b'')
+        self.transport.setService(service())
+
+    def _cbFinishedAuth(self, result):
+        """
+        The callback when user has successfully been authenticated.  For a
+        description of the arguments, see L{twisted.cred.portal.Portal.login}.
+        We start the service requested by the user.
+        """
+        (interface, avatar, logout) = result
+        self.transport.avatar = avatar
+        self.transport.logoutFunction = logout
+        service = self.transport.factory.getService(self.transport,
+                self.state.desired_service)
+        if not service:
+            raise error.ConchError('could not get next service: %s'
+                                  % self.nextService)
+        log.msg('%r authenticated with %r' % (self.state.username, None))
+        self.succeedAuth(service)
+
