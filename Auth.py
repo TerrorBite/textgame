@@ -27,6 +27,12 @@ class SSHRealm:
     def __init__(self, world):
         self.world = world
 
+    def doesAvatarExist(self, avatarId):
+        """
+        Returns True if this avatar ID is valid, otherwise false.
+        """
+        return self.world.db.user_exists(avatarId)
+
     def requestAvatar(self, avatarId, mind, *interfaces):
         """
         Requests that this Realm shall provide an "avatarAspect" which implements
@@ -71,7 +77,7 @@ class UserAuthState(object):
         self.username = username
         self.desired_service = service
         # the following line is terrifying
-        self.user_is_known = self.auth.transport.factory.portal.realm.world.db.user_exists(username)
+        self.user_is_known = self.auth.portal.realm.doesAvatarExist(username)
         # Stores phase of interactive auth
         self.phase = 0
 
@@ -85,6 +91,12 @@ class UserAuthState(object):
 
     def add_key(self, blob):
         self.pubkeys.append(blob)
+
+    def begin_interactive(self):
+        self._interactive = KeyboardInteractiveStateMachine(self.auth, self.username)
+    
+    def continue_interactive(self, responses):
+        self._interactive(responses)
 
 class UserAuthService(service.SSHService):
     """
@@ -120,15 +132,16 @@ class UserAuthService(service.SSHService):
         as soon as a user connects, in order to authenticate the user.
         """
         #log.info("{0} service starting".format(self.name) )
+        # Begin with no state.
         self.state = None
+        # Store the portal for convenience. We use the portal for authentication.
+        self.portal = self.transport.factory.portal
+        # Keep track of a few values so that we can combat bots.
         self.state_changes = 0
         self.packet_count = 0
 
-        # Stores the user's public keys, if they provided any.
-        self.seen_keys = []
-
-
-        self.send_banner("HERE BE DRAGONS!\nThis software is highly experimental. Try not to break it.\nDebug logging is enabled. DO NOT enter any real passwords!\n")
+        # Send login banner.
+        self.send_banner(self.transport.factory.bannerText)
 
     def ssh_USERAUTH_REQUEST(self, packet):
         """
@@ -167,13 +180,12 @@ class UserAuthService(service.SSHService):
 
         #log.debug(self.supportedAuthentications)
         if method == "publickey":
-            # User is not known, store their pubkeys so they can
-            #   use one to register with us.
-            log.debug(  "Pubkey attempt")
+            # User is not known, store their pubkeys so they can use one to register with us.
+            log.debug( "Pubkey attempt" )
             return self.store_pubkey( rest )
         elif method == "keyboard-interactive":
             log.debug( "Interactive attempt")
-            return self.tryKeyboardInteractive(rest)
+            return self.beginKeyboardInteractive(rest)
         elif method == "password":
             if not self.state.user_is_known:
                 # We told this client we don't support passwords
@@ -207,16 +219,10 @@ class UserAuthService(service.SSHService):
     def key2str(self, algo, blob):
         return "{0} {1}".format(algo, b64encode(blob))
 
-    def tryKeyboardInteractive(self, packet):
-        self.askQuestions([
-            #("\033[1mWelcome, \033[36m{0}\033[39m!\033[0m I don't recognise your username.\nWould you like to \033[4mr\033[0megister, proceed as a \033[4mg\033[0muest, or \033[4mq\033[0muit?\n(r/g/q): ".format(self.state.username), False)
-            ("Welcome, {0}! I don't recognise your username.\nWould you like to [r]egister, proceed as a [g]uest, or [q]uit?\n(r/g/q): ".format(self.state.username), False)
-        ])
+    def beginKeyboardInteractive(self, packet):
+        self.state.begin_interactive()
 
     def ssh_USERAUTH_INFO_RESPONSE(self, packet):
-        """
-        The user has responded with answers to our questions.
-        """
         try:
             resp = []
             numResps = struct.unpack('>L', packet[:4])[0]
@@ -231,40 +237,7 @@ class UserAuthService(service.SSHService):
         except:
             #d.errback(failure.Failure())
             pass
-        else:
-            log.debug( "Responses: {0}".format( repr(resp) ) )
-            if self.state.phase == 0:
-                r = resp[0][0].lower()
-                if( r == "r" ):
-                    self.state.phase += 1
-                    self.askQuestions([
-                        #("You are registering with the username \033[1;36m{0}\033[0m.\nPlease choose a password: ".format(self.state.username), True),
-                        ("You are registering with the username: {0}\nPlease choose a password: ".format(self.state.username), True),
-                        ("Please re-type the password: ", True)
-                    ])
-                elif r == "q":
-                    self.noAuthLeft("Please come back soon!")
-                elif r == "g":
-                    self.askQuestions([
-                        ("Sorry, guest mode actually isn't implemented yet.\nRegister or quit? (r/q): ", False) ])
-                else:
-                    self.askQuestions([
-                        ("Sorry, I don't understand your input.\nRegister, vidit as guest or quit? (r/g/q): ", False) ])
-            elif self.state.phase == 1:
-                if resp[0] != resp[1]:
-                    self.askQuestions([
-                        ("Those passwords didn't match!\nPlease choose a password: ".format(self.state.username), True),
-                        ("Please re-type the password: ", True)
-                    ])
-                else:
-                    self.state.phase += 1
-                    self.askQuestions([
-                        ("Choose a name for your first character: ", False)
-                        ])
-            else:
-                #d.callback(resp)
-                self.send_banner("This has been a test. No actual registration has been made.")
-                self.noAuthLeft("Auth test complete" )
+        self.state.continue_interactive(resp)
     
     def askQuestions(self, questions):
         resp = []
@@ -324,3 +297,68 @@ class UserAuthService(service.SSHService):
         log.msg('%r authenticated with %r' % (self.state.username, None))
         self.succeedAuth(service)
 
+class KeyboardInteractiveStateMachine(object):
+    def __init__(self, auth, username):
+        """
+        Constructor. Pass in a method that this state machine can use to ask the user questions.
+        """
+        self.auth = auth
+
+        # Get the generator that forms our state machine
+        self._state = self._interactive(username)
+
+        # Invoke its first run
+        auth.askQuestions( self._state.next() )
+
+    def __call__(self, responses=[]):
+        self.responses = responses
+        try:
+            self.auth.askQuestions( self._state.next() )
+        except StopIteration as e:
+            return self._outcome
+        return True
+
+    def _interactive(self, username):
+        """
+        This method is a generator. It yields messages that should be asked.
+        After each yield, self.responses should contain the answers to the question.
+        """
+        #("\033[1mWelcome, \033[36m{0}\033[39m!\033[0m I don't recognise your username.\nWould you like to \033[4mr\033[0megister, proceed as a \033[4mg\033[0muest, or \033[4mq\033[0muit?\n(r/g/q): ".format(self.state.username), False)
+        yield [("Welcome, {0}! I don't recognise your username.\nWould you like to [r]egister, proceed as a [g]uest, or [q]uit?\n(r/g/q): ".format(username), False)]
+        choice = self.responses[0].lower()
+
+        while len(choice)==0 or choice[0] not in "rgq":
+            yield [ ("Sorry, I don't understand your input.\nRegister, visit as a guest or quit? (r/g/q): ", False) ]
+            choice = self.responses[0].lower()
+        
+        if choice == "q":
+            self.auth.send_banner("Goodbye!")
+            self.auth.noAuthLeft("Please come again soon!")
+            return
+        elif choice == "g":
+            yield [("Please choose a name for your temporary character: ", False)]
+            charname = self.responses[0]
+            self.auth.send_banner("This is not working yet, but thank you for testing")
+            #self.auth.doGuestLogin()
+            self.auth.noAuthLeft("Goodbye!")
+            return
+
+        elif choice == "r":
+            yield [
+                #("You are registering with the username \033[1;36m{0}\033[0m.\nPlease choose a password: ".format(self.state.username), True),
+                ("You are registering with the username: {0}\nPlease choose a password: ".format(username), True),
+                ("Please re-type the password: ", True)
+            ]
+            resp = self.responses
+            while resp[0] != resp[1]:
+                yield [
+                    ("Those passwords didn't match!\nPlease choose a password: ", True),
+                    ("Please re-type the password: ", True)
+                ]
+                resp = self.responses
+            password = resp[0]
+            yield [("Choose a name for your first character: ", False)]
+            name = self.responses[0]
+
+            self.auth.send_banner("Sadly, character creation isn't implemented yet.")
+            self.auth.noAuthLeft("Please visit again soon!")

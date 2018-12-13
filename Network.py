@@ -150,6 +150,11 @@ def SSHFactoryFactory(world):
                 'ssh-userauth': UserAuthService,
                 'ssh-connection': connection.SSHConnection
                 }
+
+        # We should really be getting this motd from the world instance
+        bannerText = "HERE BE DRAGONS!\nThis software is highly experimental." + \
+        "Try not to break it.\nDebug logging is enabled. DO NOT enter any real passwords!\n"
+
         # This Portal is the conduit through which we authenticate users.
         # The SSHRealm will generate user instances after auth succeeds.
         portal = Portal(SSHRealm(world), [
