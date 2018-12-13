@@ -153,6 +153,7 @@ class UserAuthService(service.SSHService):
             self.firstContact()
             first = True
         if self.state_changes > 3 or self.packet_count > 20:
+            log.info("Disconnecting user: too many attempts")
             self.send_disconnect("You are doing that too much!")
 
         #log.debug( "Auth request for user {0}, service {1}, method {2}.".format(user, nextService, method) )
@@ -177,6 +178,7 @@ class UserAuthService(service.SSHService):
             if not self.state.user_is_known:
                 # We told this client we don't support passwords
                 # but they are ignoring us
+                log.info("Disconnecting user: illegal password attempt")
                 self.send_disconnect("This auth method is not allowed")
             else:
                 log.debug( "Denying password attempt".format(method) )

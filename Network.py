@@ -2,6 +2,7 @@ from zope.interface import implements, implementer
 
 from twisted.internet import protocol
 from twisted.conch import avatar, recvline
+from twisted.conch.checkers import SSHPublicKeyChecker
 from twisted.conch.insults import insults
 from twisted.conch.ssh import factory as conch_factory
 from twisted.conch.ssh import userauth, connection, keys, session
@@ -155,11 +156,11 @@ def SSHFactoryFactory(world):
             # This checker allows the Portal to verify passwords.
             Database.CredentialsChecker(world.db),
             # This checker allows the Portal to verify SSH keys.
-            twisted.conch.checkers.SSHPublicKeyChecker(
+            SSHPublicKeyChecker(
                 Database.AuthorizedKeystore(world.db)),
             # This "checker" will create a new user, instead of
             # authenticating an existing one.
-            Database.NewUserCreator(world.db)
+            #Database.NewUserCreator(world.db)
         ])
 
     return SSHFactory()
