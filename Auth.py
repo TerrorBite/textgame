@@ -11,6 +11,7 @@ from base64 import b64encode
 
 # Our imports
 from Util import log
+from User import SSHUser
 
 class SSHRealm:
     """
@@ -51,7 +52,9 @@ class SSHRealm:
             # avatarAspect: an instance of a class that implements that interface.
             # logout: a callable which will "detach the mind from the avatar". Spooky.
             avatar = SSHUser(self.world, avatarId)
-            return interfaces[0], avatar, avatar.logout
+            logout = avatar.on_logout if hasattr(avatar, "on_logout") and \
+                    callable(avatar.on_logout) else lambda: None
+            return interfaces[0], avatar, logout
         else:
             log.error("SSHRealm: No supported interfaces")
             raise NotImplementedError("No supported interfaces found.")
@@ -140,8 +143,22 @@ class UserAuthService(service.SSHService):
         self.state_changes = 0
         self.packet_count = 0
 
+        self.ip = self.transport.transport.getPeer().host
+
         # Send login banner.
         self.send_banner(self.transport.factory.bannerText)
+
+    def serviceStopped(self):
+        log.debug("Auth Service for {0} stopping".format(self.ip))
+
+    def isBadUsername(self, user):
+        is_bad = user.lower() in ("root", "admin", "ubnt", "support", "user", "pi")
+        if is_bad:
+            log.info('Disconnecting "{0}" from {1}: blacklisted username'.format(user, self.ip))
+            self.transport.sendDisconnect(
+                transport.DISCONNECT_ILLEGAL_USER_NAME,
+                "You can't use that username ({0}) here. Please reconnect using a different one.".format(user))
+        return is_bad
 
     def ssh_USERAUTH_REQUEST(self, packet):
         """
@@ -154,6 +171,7 @@ class UserAuthService(service.SSHService):
         """
         self.packet_count += 1
         user, nextService, method, rest = getNS(packet, 3)
+        if self.isBadUsername(user): return
         first = False
         if self.state is None or self.state.is_invalid( user, nextService ):
             # If username or desired service has changed during auth,
@@ -192,6 +210,7 @@ class UserAuthService(service.SSHService):
                 # but they are ignoring us
                 log.info("Disconnecting user: illegal password attempt")
                 self.send_disconnect("This auth method is not allowed")
+                self.transport.factory.banHost(self.ip)
             else:
                 log.debug( "Denying password attempt".format(method) )
                 self.failAuth(self.supportedAuthentications)
@@ -251,6 +270,17 @@ class UserAuthService(service.SSHService):
         self.transport.sendPacket(userauth.MSG_USERAUTH_INFO_REQUEST, packet)
         log.debug("Asked the user questions")
 
+    def doGuestLogin(self):
+        """
+        Log the user in to a guest character.
+        """
+        #self.auth.send_banner("This is not working yet, but thank you for testing")
+        #self.auth.noAuthLeft("Goodbye!")
+        (_, self.transport.avatar, self.transport.logoutFunction) = self.portal.realm.requestAvatar("admin", None, IConchUser)
+        service = self.transport.factory.getService(self.transport,
+                self.state.desired_service)
+        self.succeedAuth(service)
+
     def send_banner(self, banner):
         self.transport.sendPacket(userauth.MSG_USERAUTH_BANNER,
                 NS(banner+'\n') + NS("en-US"))
@@ -270,14 +300,14 @@ class UserAuthService(service.SSHService):
             msg)
 
     def send_disconnect(self, msg):
-        log.info("Disconnecting user {0}".format(self.state.username))
+        log.info("Disconnecting {0}".format(self.ip))
         self.transport.sendDisconnect(
             transport.DISCONNECT_HOST_NOT_ALLOWED_TO_CONNECT,
             msg)
 
     def succeedAuth(self, service):
         # Authentication has succeeded fully.
-        self.transport.sendPacket(MSG_USERAUTH_SUCCESS, b'')
+        self.transport.sendPacket(userauth.MSG_USERAUTH_SUCCESS, b'')
         self.transport.setService(service())
 
     def _cbFinishedAuth(self, result):
@@ -310,6 +340,8 @@ class KeyboardInteractiveStateMachine(object):
         # Invoke its first run
         auth.askQuestions( self._state.next() )
 
+        self._outcome = False
+
     def __call__(self, responses=[]):
         self.responses = responses
         try:
@@ -338,9 +370,7 @@ class KeyboardInteractiveStateMachine(object):
         elif choice == "g":
             yield [("Please choose a name for your temporary character: ", False)]
             charname = self.responses[0]
-            self.auth.send_banner("This is not working yet, but thank you for testing")
-            #self.auth.doGuestLogin()
-            self.auth.noAuthLeft("Goodbye!")
+            self.auth.doGuestLogin()
             return
 
         elif choice == "r":

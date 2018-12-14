@@ -393,7 +393,9 @@ class SSHUser(avatar.ConchUser, User):
         trans.makeConnection(session.wrapProtocol(proto))
         #self.send_message("Hi there!")
         # Obtain the Player object from the database
-        self.player = self.world.get_thing(self.world.db.get_player_id(self.username))
+        player_id = self.world.db.get_player_id(self.username)
+        log.debug("Username: {0}, id: {1}".format(self.username, player_id))
+        self.player = self.world.get_thing(player_id)
         # Finish login (what does this call do?)
         self.complete_login()
 

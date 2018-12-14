@@ -33,7 +33,7 @@ def require_connection(f):
     def wrapper(self, *args, **kwargs):
         if not hasattr(self, "active"): self.active = False
         if not self.active: raise DatabaseNotConnected()
-        f(self, *args, **kwargs)
+        return f(self, *args, **kwargs)
     return wrapper
 
 class DatabaseNotConnected(Exception):

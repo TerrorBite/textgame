@@ -124,6 +124,9 @@ def SSHFactoryFactory(world):
     publicKey = file('host_rsa.pub', 'r').read()
     privateKey = file('host_rsa', 'r').read()
 
+    # Global ban list shared by all factories.
+    banlist = []
+
     import Database
     from twisted.cred.portal import Portal
     class SSHFactory(conch_factory.SSHFactory):
@@ -167,6 +170,23 @@ def SSHFactoryFactory(world):
             # authenticating an existing one.
             #Database.NewUserCreator(world.db)
         ])
+
+        def buildProtocol(self, addr):
+            # Reject this connection if the IP is banned.
+            if addr.host in banlist:
+                log.info("Rejecting connection from banned IP {0}".format(addr.host))
+                return None
+            # otherwise all good; let superclass do the rest
+            log.info("Incoming SSH connection from {0}".format(addr.host))
+            return conch_factory.SSHFactory.buildProtocol(self, addr)
+
+        def banHost(self, host, duration=None):
+            """
+            Bans a host from connecting.
+            """
+            #TODO: Timed bans?
+            log.info("Banning IP {0}".format(host))
+            banlist.append(host)
 
     return SSHFactory()
     # End of SSH host key loading code
