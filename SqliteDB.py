@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS objects (
                  (4, 'drink',         3,  0,  2,  1,  0,   0, now, now, now, None),
                 ]
             c.executemany("""INSERT INTO objects VALUES(?,?, ?,?,?,?,?, ?, ?,?,?, ?)""", t)
-            # Set Room #0's owner as God
+            # Set Room #0's owner as #1
             c.execute("""UPDATE objects SET owner=1 WHERE id=0""")
             log(LogLevel.Info, '-- Created initial database objects.')
 
@@ -149,21 +149,35 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,  -- Username (is primary key)
     password TEXT,              -- Password hash (hexadecimal)
     salt TEXT,                  -- Salt used in hash (hexadecimal)
-    email TEXT,                 -- Email address
-    obj INTEGER,                -- Character reference
-    -- Note: In future, the "obj" field will be removed and a separate table
-    -- created which allows each account to have multiple characters associated.
+    email TEXT                  -- Email address
 
-    FOREIGN KEY(obj) REFERENCES objects(id)
 )
                     """)
 
             log(LogLevel.Info, '- Created users table.')
             # Create admin user
-            pwhash, salt = self.create_hash('admin')
-            t = ('admin', pwhash, salt, 'admin@localhost', 1)
-            c.execute("""INSERT INTO users VALUES (?, ?, ?, ?, ?)""", t)
+            pwhash, salt = self.create_hash('creator')
+            t = ('creator', pwhash, salt, 'admin@localhost')
+            c.execute("""INSERT INTO users VALUES (?, ?, ?, ?)""", t)
             log(LogLevel.Info, '-- Created admin user.')
+
+        if 'characters' not in tables:
+            c.execute("""
+CREATE TABLE IF NOT EXISTS characters (
+    -- Pairs a character to a user account.
+
+    username TEXT,              -- Username that owns this character
+    obj INTEGER,                -- Reference to the Player object of the character
+
+    FOREIGN KEY(username) REFERENCES users(username),
+    FOREIGN KEY(obj) REFERENCES objects(id)
+)
+                    """)
+
+            log(LogLevel.Info, '- Created characters table.')
+            t = ('creator', pwhash, salt, 'admin@localhost')
+            c.execute("""INSERT INTO users VALUES (?, ?, ?, ?)""", t)
+            log(LogLevel.Info, '-- Created admin character.')
 
         #TODO: Obliterate messages table in favor of using properties
         # Stores extended data about an object, currently comprised of the following data:
