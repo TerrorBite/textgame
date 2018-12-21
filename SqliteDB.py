@@ -175,8 +175,8 @@ CREATE TABLE IF NOT EXISTS characters (
                     """)
 
             log(LogLevel.Info, '- Created characters table.')
-            t = ('creator', pwhash, salt, 'admin@localhost')
-            c.execute("""INSERT INTO users VALUES (?, ?, ?, ?)""", t)
+            t = ('creator', 1)
+            c.execute("""INSERT INTO characters VALUES (?, ?)""", t)
             log(LogLevel.Info, '-- Created admin character.')
 
         #TODO: Obliterate messages table in favor of using properties
