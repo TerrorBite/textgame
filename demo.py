@@ -1,5 +1,5 @@
 
-from World import World
+from textgame.World import World
 
 world = World()
 

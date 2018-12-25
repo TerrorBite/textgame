@@ -1,5 +1,7 @@
-from Database import DBType
-from SqliteDB import SqliteDatabase as Database
+#from Database import DBType
+#from SqliteDB import SqliteDatabase as Database
+
+from textgame.db import DBType, Database
 from Things import Thing
 from Util import log, LogLevel
 from twisted.internet import task
@@ -58,6 +60,7 @@ def ThingProxyFactory(_world):
         world = _world # type: World
 
         def __init__(self, world, objid):
+            assert objid is not None, "Object ID is None!"
 
             # Our setattr is overridden, work around this.
             self.__dict__.update({
@@ -87,7 +90,7 @@ def ThingProxyFactory(_world):
             If the Thing is not loaded, then we will load it now.
             """
             # Note that __getattr__ is ONLY called for attributes that do not already exist
-            #log(LogLevel.Trace, "Attempting access for (#{0}).{1}".format(self._id, name))
+            #log.trace("Attempting access for (#{0}).{1}".format(self._id, name))
 
             # We use __getattribute__ here, just in case self._thing doesn't
             # exist for some reason (which would cause an infinite loop).
@@ -106,6 +109,7 @@ def ThingProxyFactory(_world):
             """
             thing = self.world.db.load_object(self.world, self._id)
             assert thing is not None, "The thing in {0} is None! This shouldn't happen".format(self)
+            thing.world = self.world
             # Use object.__setattr__ to set self._thing because we overrode our own __setattr__
             object.__setattr__(self, '_thing', thing)
             # Add ourselves to the live set, this tells the World to consider us for unloading
@@ -180,8 +184,8 @@ class World(object):
     The World class represents the game world. It manages the collection of objects that together comprise the world.
     """
 
-    def __init__(self):
-        self.db = Database()
+    def __init__(self, backend, database):
+        self.db = Database(backend, database)
         self.cache = {}
         self.live_set = set() # The live set tracks ThingProxies that are keeping Things loaded
         self.cache_task = task.LoopingCall(self.purge_cache)
@@ -242,7 +246,7 @@ class World(object):
             # Get Things and return them
             return map(lambda x: self.get_thing(x), items)
         except AttributeError:
-            raise TypeError("Expected a Thing as argument")
+            raise TypeError("Expected a Thing as argument, got {0}".format(type(thing)))
 
     def save_thing(self, thing):
         #TODO: Review this function vs. calling thing.force_save()
@@ -274,7 +278,7 @@ def getWorld():
     if not _world:
         # Instantiate singleton
         log(LogLevel.Debug, "Instantiating world singleton")
-        _world = World()
+        _world = World("Sqlite", "world.db")
     
     return _world
 

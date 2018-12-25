@@ -127,7 +127,7 @@ def SSHFactoryFactory(world):
     # Global ban list shared by all factories.
     banlist = []
 
-    import Database
+    from textgame.db import Credentials
     from twisted.cred.portal import Portal
     class SSHFactory(conch_factory.SSHFactory):
         """
@@ -162,10 +162,10 @@ def SSHFactoryFactory(world):
         # The SSHRealm will generate user instances after auth succeeds.
         portal = Portal(SSHRealm(world), [
             # This checker allows the Portal to verify passwords.
-            Database.CredentialsChecker(world.db),
+            Credentials.CredentialsChecker(world.db),
             # This checker allows the Portal to verify SSH keys.
             SSHPublicKeyChecker(
-                Database.AuthorizedKeystore(world.db)),
+                Credentials.AuthorizedKeystore(world.db)),
             # This "checker" will create a new user, instead of
             # authenticating an existing one.
             #Database.NewUserCreator(world.db)

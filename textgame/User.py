@@ -65,9 +65,13 @@ class User(object):
     This class is responsible for parsing incoming text from a user, acting on commands, etc.
     """
     def __init__(self, world, username, transport=None):
+        # Transport
         self.transport = transport
+        # The username of the connected user.
         self.username = username
+        # The world which the user is joining.
         self.world = world
+        # The user begins in the New state.
         self.state = State.New
 
     def send_message(self, msg):
@@ -234,7 +238,10 @@ class User(object):
 
     def complete_login(self):
         """
-        This code is run when a character is successfully connected to.
+        This code is run after a character is successfully connected to.
+
+        When this function is called, the self.player object should already
+        be initialized.
         """
         self.my_state = State.LoggedIn
         log(LogLevel.Notice, "{0}#{1} connected from {2}".format(self.player.name, self.player.id, '<unknown>'))
@@ -366,12 +373,13 @@ class SSHUser(avatar.ConchUser, User):
     """
     implements(ISession)
     
-    def __init__(self, world, username):
+    def __init__(self, world, username, charname):
         self.savedSize = ()
         # Initialize our superclasses.
         # Don't change these to use super(), it will break
         avatar.ConchUser.__init__(self)
         User.__init__(self, world, username)
+        self.charname = charname
         # what does the following do?
         self.channelLookup.update({'session':session.SSHSession})
 
@@ -393,8 +401,9 @@ class SSHUser(avatar.ConchUser, User):
         trans.makeConnection(session.wrapProtocol(proto))
         #self.send_message("Hi there!")
         # Obtain the Player object from the database
-        player_id = self.world.db.get_player_id(self.username)
-        log.debug("Username: {0}, id: {1}".format(self.username, player_id))
+        player_id = self.world.db.get_player_id(self.username, self.charname)
+        log.debug("Username: {0}, character: {2}, id: {1}".format(self.username, player_id, self.charname))
+
         self.player = self.world.get_thing(player_id)
         # Finish login (what does this call do?)
         self.complete_login()

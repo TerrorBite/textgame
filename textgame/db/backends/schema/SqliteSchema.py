@@ -1,4 +1,5 @@
 from textwrap import dedent
+import time
 
 class Schema(object):
     # Stores CREATE TABLE statements.
@@ -100,7 +101,7 @@ class Schema(object):
                 FOREIGN KEY(lock) REFERENCES objects(id)
             )""",
             
-        "acl": """
+        "acls": """
             CREATE TABLE IF NOT EXISTS acl (
                 -- This many-to-many table contains Access Control List entries.
 
@@ -138,11 +139,11 @@ class Schema(object):
             """),
         
         "properties": ("""
-                CREATE UNIQUE INDEX IF NOT EXISTS key_index ON props(obj, key)
+                CREATE UNIQUE INDEX IF NOT EXISTS key_index ON properties(obj, key)
                     -- Properties are uniquely indexed by id-key pairing.
                     -- This constraint ensures that an object cannot have the same key twice,
                     -- which ensures our INSERT OR REPLACE statement will work correctly.
-            """
+            """,)
     }
 
     # This is a tuple, each item is a tuple of SQL statements.
@@ -163,14 +164,14 @@ class Schema(object):
 
         if tablename in self.indices:
             # Create any indexes that this table has.
-            for item of self.indices[tablename]:
+            for item in self.indices[tablename]:
                 self.cursor.execute( dedent(item).strip() )
 
         if len(values) > 0:
             # Make some question marks separated by commas.
             qmarks = ','.join( ["?"] * len(values[0]) )
             # Create insert statement.
-            insert = "INSERT INTO {0} VALUES({1})".format( tablename, qmarks )
+            insert = "INSERT OR IGNORE INTO {0} VALUES({1})".format( tablename, qmarks )
             # Execute insert statement.
             self.cursor.executemany( insert, values )
 
@@ -207,8 +208,9 @@ class Schema(object):
             (4, '_/fail', "You can't drink tea that you don't have.")
         ])
 
-        # Users table
-        self._create_table( "users" )
+        # Users table etc
+        for table in "users characters locks acls scripts deleted".split():
+            self._create_table( table )
 
     def upgrade(self):
         """
@@ -219,14 +221,15 @@ class Schema(object):
         current = int( self.cursor.fetchone()[0] )
         upgrades = self.upgrades[current:]
         for upgrade in upgrades:
-            log.info( "Upgrading schema: {0} => {1}".format( current, current+1 )
+            log.info( "Upgrading schema: {0} => {1}".format( current, current+1 ) )
             try:
                 with cursor.connection:
                     for statement in upgrade:
                         self.cursor.execute( statement )
                     current += 1
                     self.cursor.execute( "REPLACE INTO meta (key, value) VALUES ('schema_version', ?)", (current,) )
-            except sqlite3.IntegrityError
+            except sqlite3.IntegrityError:
+                pass
     
     def get_tables(self):
         self.cursor.execute("""SELECT name FROM sqlite_master WHERE type='table'""")

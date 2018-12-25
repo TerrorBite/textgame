@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from Util import log, LogLevel, setLogLevel, pip_install
+from textgame.Util import log, LogLevel, setLogLevel, pip_install
 setLogLevel(LogLevel.Trace)
 
 log(LogLevel.Info, "Loading...")
@@ -16,13 +16,13 @@ except ImportError as e:
         exit(1)
     from twisted.internet import reactor, protocol, task
 
-from Network import BasicUserSession, SSHFactoryFactory
+from textgame.Network import BasicUserSession, SSHFactoryFactory
 
     
 
 def main():
 
-    import World
+    from textgame import World
     log(LogLevel.Notice, 'Initializing world...')
     world = World.getWorld() # Note: Currently, World is a singleton
     #world.db.db_get_user('admin')

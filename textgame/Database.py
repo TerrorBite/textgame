@@ -9,6 +9,12 @@ import hashlib, struct, random, time, functools
 from Things import *
 from Util import enum, log, LogLevel
 
+log.warn("########## DEPRECATION WARNING ##########")
+log.warn("# This module is deprecated. Do not use #")
+log.warn("# it! Instead, the textgame.db package  #")
+log.warn("# should be used.                       #")
+log.warn("#########################################")
+
 # This is the master list of Thing types as used in the database.
 # DO NOT CHANGE THE ORDER OF THIS LIST as it will break existing databases.
 thingtypes = [Room, Player, Item, Action, Script]
@@ -35,63 +41,6 @@ def require_connection(f):
         if not self.active: raise DatabaseNotConnected()
         return f(self, *args, **kwargs)
     return wrapper
-
-class DatabaseNotConnected(Exception):
-    pass
-
-class IDatabaseBackend(Interface):
-    """
-    This interface should be implemented by a class which knows how to
-    communicate with a particular type of database. For example: SQLite,
-    MariaDB, or PostgreSQL.
-
-    Not currently used!
-    """
-
-    def __init__(self, connect_string):
-        """
-        Creates this database instance. Should connect to the database when it is called.
-
-        The connect_string is an implementation-specific string which tells the instance
-        how to connect to the desired database. For SQLite, this might just be the filename
-        of the database file. For other engines, this string might be in the form
-        "username:password@hostname:port". The string that is passed in will be provided
-        directly from a config file where the admin can put any string they need to.
-        """
-
-    def close(self):
-        """
-        Cleanly close the database connection.
-
-        After this is called, the instance is not expected to be usable.
-        """
-
-    def get_user(self, username):
-        """
-        Given a username, this method returns a record from the User table if the user
-        exists, and None otherwise.
-        """
-
-    def get_character(self, username, charname):
-        """
-        Given a username and a character name, this method returns a record from the
-        Things table if the character exists, and None otherwise.
-        """
-
-    def get_property(self, obj, key):
-        """
-        This method should return the value of the property named "key" on the object whose
-        id is "obj".
-        """
-        pass
-
-    def set_property(self, obj, key, val):
-        """
-        This method should set the value of the property named "key" on the object whose
-        id is "obj" to the value "val".
-        """
-        pass
-
 
 class Database(object):
     # This is an Abstract Base Class
@@ -378,50 +327,6 @@ class Database(object):
         there are no "holes" to be filled in the database, and a fresh ID should be used instead.
         """
         pass
-
-from twisted.internet import defer
-from twisted.cred import credentials, error as cred_error
-
-@implementer(ICredentialsChecker)
-class CredentialsChecker(object):
-    """
-    This class implements the ICredentialsChecker interface.
-
-    When provided with credentials which implement IUsernamePassword,
-    it will check the credentials against the database and respond
-    according to whether the check succeeded.
-
-    This credentials checker is ONLY for checking username and
-    password; for SSH public key authentication, a standard
-    twisted.conch.checkers.SSHPublicKeyChecker should be used
-    in conjunction with our AuthorizedKeystore class.
-    """
-    # We know how to check a username and password
-    credentialInterfaces = (credentials.IUsernamePassword,)
-
-    def __init__(self, database):
-        log(LogLevel.Trace, "CredentialsChecker created")
-        self.db = database
-
-    def requestAvatarId(self, credentials):
-        log(LogLevel.Trace, "Asked to check credentials for {0}".format(credentials.username))
-        try:
-            user = credentials.username
-            if self.db.player_login(user, credentials.password) == -1:
-                log(LogLevel.Info, "{0} failed user authentication".format(user))
-                return defer.fail(cred_error.UnauthorizedLogin("Authentication failure: No such user or bad password"))
-            else:
-                log(LogLevel.Debug, "Successful auth for {0}".format(user))
-                return defer.succeed(user)
-        except Exception as e:
-            from traceback import print_exc
-            print_exc(e)
-
-    def _checkPassword(self, creds):
-        pass
-    def _checkPubkey(self, creds):
-        pass
-
 if __name__ == '__main__':
     d = Database()
     
@@ -429,27 +334,3 @@ if __name__ == '__main__':
     log(LogLevel.Info, "Test failed password check: " + repr(d.check_pass('admin', 'wrongpass')))
 
     d.close()
-
-@implementer(IAuthorizedKeysDB)
-class AuthorizedKeystore(object):
-    """
-    This class provides a twisted.conch.checkers.SSHPublicKeyChecker
-    with a way to retrieve public keys from our database.
-    """
-    def __init__(self, database):
-        """
-        Provides SSH Authorized Keys from the database.
-        """
-        self.db = database
-        
-    def getAuthorizedKeys(self, username):
-        """
-        Fetches the list of public keys (as instances of
-        twisted.conch.ssh.keys.Key) that are associated
-        with this username.
-        """
-        #TODO: Implement this
-        # The parameter is the value returned by
-        # ICredentialsChecker.requestAvatarId().
-        log.debug('AuthorizedKeys( "{0}" )'.format(username))
-        return []

@@ -32,7 +32,8 @@ class SSHRealm:
         """
         Returns True if this avatar ID is valid, otherwise false.
         """
-        return self.world.db.user_exists(avatarId)
+        # Query the database as to whether the username exists.
+        return self.world.db.username_exists(avatarId)
 
     def requestAvatar(self, avatarId, mind, *interfaces):
         """
@@ -42,7 +43,8 @@ class SSHRealm:
 
         avatarId: the username which we are getting an instance for.
         mind: an object that implements a client-side interface for this Realm.
-            This is an object provided by our UserAuthService, and is always None.
+            This is an object provided by our UserAuthService, and we actually
+            abuse this to pass in the character name.
         interfaces: list of interfaces that the mind is compatible with. In our
             case this is only ever going to be IConchUser, so we don't really care.
         """
@@ -51,7 +53,7 @@ class SSHRealm:
             # interface: one of the interfaces passed in.
             # avatarAspect: an instance of a class that implements that interface.
             # logout: a callable which will "detach the mind from the avatar". Spooky.
-            avatar = SSHUser(self.world, avatarId)
+            avatar = SSHUser(self.world, avatarId, mind)
             logout = avatar.on_logout if hasattr(avatar, "on_logout") and \
                     callable(avatar.on_logout) else lambda: None
             return interfaces[0], avatar, logout
@@ -274,9 +276,11 @@ class UserAuthService(service.SSHService):
         """
         Log the user in to a guest character.
         """
-        #self.auth.send_banner("This is not working yet, but thank you for testing")
-        #self.auth.noAuthLeft("Goodbye!")
-        (_, self.transport.avatar, self.transport.logoutFunction) = self.portal.realm.requestAvatar("admin", None, IConchUser)
+        #TODO: This currently logs in to the admin account.
+        # This needs to log in to a guest character, by requesting
+        # an avatar with IConchGuestUser or similar.
+        (_, self.transport.avatar, self.transport.logoutFunction) = \
+                self.portal.realm.requestAvatar("admin", "The Creator", IConchUser)
         service = self.transport.factory.getService(self.transport,
                 self.state.desired_service)
         self.succeedAuth(service)

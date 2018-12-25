@@ -19,7 +19,7 @@ class Thing(object):
             parent_id, owner_id, link_id, money,
             created, modified, lastused):
 
-        # Keep a reference to the world instance
+        # Slot for a reference to the world instance.
         self.world = world
 
         # Set up properties cache
@@ -85,6 +85,7 @@ class Thing(object):
     @property
     def desc(self):
         "Gets the description of this Thing."
+        # We assume that _desc was pre-cached
         return self._propcache['_/desc']
 
     @desc.setter
