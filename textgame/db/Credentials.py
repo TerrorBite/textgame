@@ -36,7 +36,7 @@ class CredentialsChecker(object):
         log.trace("Asked to check credentials for {0}".format(credentials.username))
         try:
             user = credentials.username
-            if self.db.verify_password(user, credentials.password):
+            if not self.db.verify_password(user, credentials.password):
                 log.info("{0} failed user authentication".format(user))
                 return defer.fail(cred_error.UnauthorizedLogin("Authentication failure: No such user or bad password"))
             else:

@@ -128,7 +128,9 @@ class Database(object):
         pwhash, salt = result
         log.trace("Successfully retrieved hash={0}, salt={1} from database".format(pwhash, salt))
         # Hash provided password and compare with database
-        if pwhash.decode('hex_codec') != self.hash_pass(password, salt.decode('hex_codec')):
+        inputhash = hash_pass(password, salt.decode('hex_codec'))
+        log.trace("Hashed input password to: {0}".format(inputhash.encode('hex_codec')))
+        if pwhash.decode('hex_codec') != inputhash:
             log.debug("Password hash mismatch for user {0}".format(username))
             return False
         return True

@@ -1,5 +1,5 @@
 
-from zope.interface import implements, Interface
+from zope.interface import implementer, Interface
 
 
 from twisted.conch import avatar
@@ -361,6 +361,7 @@ class User(object):
         return True # Found a match
 
 
+@implementer(ISession)
 class SSHUser(avatar.ConchUser, User):
     """
     This is an adaptor on top of the User class which makes it available
@@ -371,17 +372,27 @@ class SSHUser(avatar.ConchUser, User):
     interfacing with a human rather than client software, so it's actually presenting
     a text-based user interface across the transport.
     """
-    implements(ISession)
     
-    def __init__(self, world, username, charname):
+    def __init__(self, world, username):
         self.savedSize = ()
         # Initialize our superclasses.
         # Don't change these to use super(), it will break
         avatar.ConchUser.__init__(self)
         User.__init__(self, world, username)
-        self.charname = charname
         # what does the following do?
         self.channelLookup.update({'session':session.SSHSession})
+
+    def select_character(self, charname):
+        """
+        Sets the character name which this SSHUser will access.
+        """
+        chars = self.world.db.get_user_characters(self.username)
+        if charname.lower() in [c.lower() for c in chars]:
+            self._charname = charname
+            return True
+        else:
+            # Requested character name not found
+            return False
 
     def openShell(self, trans):
         """
@@ -392,8 +403,9 @@ class SSHUser(avatar.ConchUser, User):
         # In our case, it presents a TTY-based user interface to the user, while all we care
         # about is sending lines to the user and receiving lines from them.
         from Network import SSHServerProtocol
-        # Get the protocol instance
-        # (Why is the proto called transport?)
+        # Get the protocol instance. The protocol is also our transport.
+        #     Note that the Twisted networking model is a stack of protocols,
+        #     where lower level protocols transport higher level ones.
         self.transport = proto = SSHServerProtocol(self, *self.savedSize)
         # Connect the protocol and the transport together (I don't really understand why
         # it needs to be connected both ways like this, or what the wrapper does)
@@ -401,8 +413,8 @@ class SSHUser(avatar.ConchUser, User):
         trans.makeConnection(session.wrapProtocol(proto))
         #self.send_message("Hi there!")
         # Obtain the Player object from the database
-        player_id = self.world.db.get_player_id(self.username, self.charname)
-        log.debug("Username: {0}, character: {2}, id: {1}".format(self.username, player_id, self.charname))
+        player_id = self.world.db.get_player_id(self.username, self._charname)
+        log.debug("Username: {0}, character: {2}, id: {1}".format(self.username, player_id, self._charname))
 
         self.player = self.world.get_thing(player_id)
         # Finish login (what does this call do?)

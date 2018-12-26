@@ -1,7 +1,7 @@
 # Twisted imports
 from zope.interface import implements, implementer
 from twisted.conch.interfaces import IConchUser
-from twisted.cred import portal
+from twisted.cred import portal, credentials
 from twisted.conch.ssh.common import NS, getNS
 from twisted.conch.ssh import service, transport, userauth
 
@@ -43,8 +43,7 @@ class SSHRealm:
 
         avatarId: the username which we are getting an instance for.
         mind: an object that implements a client-side interface for this Realm.
-            This is an object provided by our UserAuthService, and we actually
-            abuse this to pass in the character name.
+            This is an object provided by our UserAuthService. We don't use this.
         interfaces: list of interfaces that the mind is compatible with. In our
             case this is only ever going to be IConchUser, so we don't really care.
         """
@@ -53,7 +52,7 @@ class SSHRealm:
             # interface: one of the interfaces passed in.
             # avatarAspect: an instance of a class that implements that interface.
             # logout: a callable which will "detach the mind from the avatar". Spooky.
-            avatar = SSHUser(self.world, avatarId, mind)
+            avatar = SSHUser(self.world, avatarId)
             logout = avatar.on_logout if hasattr(avatar, "on_logout") and \
                     callable(avatar.on_logout) else lambda: None
             return interfaces[0], avatar, logout
@@ -98,9 +97,9 @@ class UserAuthState(object):
         self.pubkeys.append(blob)
 
     def begin_interactive(self):
-        self._interactive = KeyboardInteractiveStateMachine(self.auth, self.username)
+        self._interactive = KeyboardInteractiveStateMachine(self.auth, self.username, self.user_is_known)
     
-    def continue_interactive(self, responses):
+    def continue_interactive(self, responses=[]):
         self._interactive(responses)
 
 class UserAuthService(service.SSHService):
@@ -147,6 +146,13 @@ class UserAuthService(service.SSHService):
 
         self.ip = self.transport.transport.getPeer().host
 
+        # Set this initially
+        self.transport.logoutFunction = lambda: None
+
+        # Set the avatar to None. We can use this to check if auth has succeeded.
+        # If the avatar is still None, then auth did not succeed.
+        self.transport.avatar = None
+
         # Send login banner.
         self.send_banner(self.transport.factory.bannerText)
 
@@ -154,7 +160,7 @@ class UserAuthService(service.SSHService):
         log.debug("Auth Service for {0} stopping".format(self.ip))
 
     def isBadUsername(self, user):
-        is_bad = user.lower() in ("root", "admin", "ubnt", "support", "user", "pi")
+        is_bad = user.lower() in ("root", "asdmin", "ubnt", "support", "user", "pi")
         if is_bad:
             log.info('Disconnecting "{0}" from {1}: blacklisted username'.format(user, self.ip))
             self.transport.sendDisconnect(
@@ -185,40 +191,69 @@ class UserAuthService(service.SSHService):
             #log.debug(dir(self.transport.factory.portal))
             self.firstContact()
             first = True
+        log.debug( "Auth request for user {0}, service {1}, method {2}.".format(user, nextService, method) )
         if self.state_changes > 3 or self.packet_count > 20:
             log.info("Disconnecting user: too many attempts")
-            self.send_disconnect("You are doing that too much!")
+            self.disconnect_hostNotAllowed("You are doing that too much!")
 
-        #log.debug( "Auth request for user {0}, service {1}, method {2}.".format(user, nextService, method) )
+        if first and self.state.user_is_known:
+            self.supportedAuthentications.append("password")
+
+        if method == "none":
+            # We want to push the user through keyboard-interactive.
+            # This lets the client know what methods we do support.
+            return self.send_authFail()
 
         if self.state.user_is_known:
             # Username is known to us! Do normal login.
-            if first:
-                self.supportedAuthentications = ["publickey",
-                    "keyboard-interactive", "password"]
-            return tryAuth( method, rest )
+            return self.handle_known_user( method, rest )
 
-        #log.debug(self.supportedAuthentications)
+        else:
+            # This user is not known to us.
+            return self.handle_new_user(method, rest)
+
+    def handle_new_user(self, method, rest):
+        """
+        Handles incoming auth from a new, unknown username.
+        """
         if method == "publickey":
-            # User is not known, store their pubkeys so they can use one to register with us.
+            # Store their pubkeys so they can use one to register with us.
             log.debug( "Pubkey attempt" )
-            return self.store_pubkey( rest )
+            self.store_pubkey( rest )
         elif method == "keyboard-interactive":
             log.debug( "Interactive attempt")
-            return self.beginKeyboardInteractive(rest)
+            # Start up the keyboard-interactive state machine.
+            # This will take care of asking questions.
+            self.state.begin_interactive()
         elif method == "password":
-            if not self.state.user_is_known:
-                # We told this client we don't support passwords
-                # but they are ignoring us
-                log.info("Disconnecting user: illegal password attempt")
-                self.send_disconnect("This auth method is not allowed")
-                self.transport.factory.banHost(self.ip)
-            else:
-                log.debug( "Denying password attempt".format(method) )
-                self.failAuth(self.supportedAuthentications)
+            # We told this client we don't support passwords
+            # but they are ignoring us. Probably a bot.
+            log.info("Disconnecting user: illegal password attempt")
+            self.disconnect_noAuthAllowed("This auth method is not allowed")
+            self.transport.factory.banHost(self.ip)
         else:
+            # No idea what this is, but we don't support it.
             log.debug( "Unknown {0} attempt".format(method) )
-            return self.failAuth(self.supportedAuthentications)
+            self.send_authFail()
+
+    def handle_known_user(self, method, rest):
+        if method == "publickey":
+            #TODO: Do public key auth for the user.
+            algo, blob, rest = getNS(rest[1:], 2)
+            log.trace( self.key2str(algo, blob))
+            self.send_authFail()
+        elif method == "keyboard-interactive":
+            log.debug( "Interactive attempt")
+            # Start up the keyboard-interactive state machine.
+            # This will take care of asking questions.
+            self.state.begin_interactive()
+        elif method == "password":
+            #TODO: Do password auth for the user.
+            self.send_authFail()
+        else:
+            # No idea what this is, but we don't support it.
+            log.debug( "Unknown {0} attempt".format(method) )
+            self.send_authFail()
     
     def firstContact(self):
         """
@@ -227,21 +262,20 @@ class UserAuthService(service.SSHService):
         known_text = "Known" if self.state.user_is_known else "Unknown"
         log.info("{0} user {1} is authenticating".format(known_text, self.state.username))
 
-    def auth_pubkey(self, pubkey):
-        log.debug("Got a pubkey")
-
     def store_pubkey(self, pubkey):
+        """
+        Temporarily store a publickey in the auth session state.
+
+        These can later be retrieved and stored permanently if an account is created.
+        """
         algo, blob, rest = getNS(pubkey[1:], 2)
         self.state.add_key(blob)
         log.debug( self.key2str(algo, blob) )
         # Tell client that this key didn't auth them
-        self.failAuth(self.supportedAuthentications)
+        self.send_authFail()
 
     def key2str(self, algo, blob):
         return "{0} {1}".format(algo, b64encode(blob))
-
-    def beginKeyboardInteractive(self, packet):
-        self.state.begin_interactive()
 
     def ssh_USERAUTH_INFO_RESPONSE(self, packet):
         try:
@@ -279,38 +313,85 @@ class UserAuthService(service.SSHService):
         #TODO: This currently logs in to the admin account.
         # This needs to log in to a guest character, by requesting
         # an avatar with IConchGuestUser or similar.
+
+        # Obtain and store the avatar and logout function
         (_, self.transport.avatar, self.transport.logoutFunction) = \
-                self.portal.realm.requestAvatar("admin", "The Creator", IConchUser)
-        service = self.transport.factory.getService(self.transport,
-                self.state.desired_service)
-        self.succeedAuth(service)
+                self.portal.realm.requestAvatar("admin", None, IConchUser)
+        # Select the appropriate character on the avatar.
+        self.transport.avatar.select_character("The Creator")
+        # Finish authentication successfully
+        self.succeedAuth()
+
+
+    def check_password(self, password):
+        """
+        Given a password, checks it
+        TODO: make this play nice with Deferreds
+
+        This invokes the credentials checker that's registered for this instance.
+        """
+        # Create a username/password pair and try to log in with it
+        creds = credentials.UsernamePassword( self.state.username, password )
+        deferred = self.portal.login( creds, None, IConchUser )
+        def finished(result):
+            # Auth succeeded
+            _, self.transport.avatar, self.transport.logoutFunction = result
+        def failed(result):
+            pass
+        deferred.addCallback( finished )
+        deferred.addErrback( failed )
 
     def send_banner(self, banner):
+        """
+        Sends a Userauth Banner packet, causing the specified banner text to be
+        displayed by the client.
+        """
         self.transport.sendPacket(userauth.MSG_USERAUTH_BANNER,
                 NS(banner+'\n') + NS("en-US"))
 
-    def continueNextAuth(self, remaining):
-        # This auth attempt wasn't immediately successful.
-        self.transport.sendPacket(userauth.MSG_USERAUTH_FAILURE,
-                NS(','.join(remaining)) + '\xff')
-    
-    def failAuth(self, remaining):
-        self.transport.sendPacket(userauth.MSG_USERAUTH_FAILURE,
-                NS(','.join(remaining)) + '\x00')
+    def send_authFail(self, partial=False):
+        """
+        Send a Userauth Failure packet containing the list of authentication methods
+        which are still permitted.
 
-    def noAuthLeft(self, msg):
+        The "partial" parameter specifies whether the packet should indicate partial
+        success, which tells the client that it gave correct credentials, however
+        further credentials (such as a second factor) are still required to complete
+        authentication. If omitted, this parameter defaults to False.
+        """
+        self.transport.sendPacket(userauth.MSG_USERAUTH_FAILURE,
+                NS(','.join(self.supportedAuthentications)) + ('\xff' if partial else '\x00'))
+
+    def disconnect_noAuthLeft(self, msg):
+        """
+        Sends a "No More Auth Methods Available" disconnect packet to the client.
+
+        The parameter is a string to send as the disconnection message.
+        """
         self.transport.sendDisconnect(
             transport.DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE,
             msg)
 
-    def send_disconnect(self, msg):
+    def disconnect_hostNotAllowed(self, msg):
+        """
+        Sends a "Host Not Allowed To Connect" disconnect packet to the client.
+
+        The parameter is a string to send as the disconnection message.
+        """
         log.info("Disconnecting {0}".format(self.ip))
         self.transport.sendDisconnect(
             transport.DISCONNECT_HOST_NOT_ALLOWED_TO_CONNECT,
             msg)
 
-    def succeedAuth(self, service):
+    def succeedAuth(self):
+        """
+        Sends a Userauth Success packet to the client, then switches the transport
+        to the client's desired service.
+        """
         # Authentication has succeeded fully.
+        # Obtain the service desired by the end user
+        service = self.transport.factory.getService(self.transport,
+                self.state.desired_service)
         self.transport.sendPacket(userauth.MSG_USERAUTH_SUCCESS, b'')
         self.transport.setService(service())
 
@@ -329,17 +410,18 @@ class UserAuthService(service.SSHService):
             raise error.ConchError('could not get next service: %s'
                                   % self.nextService)
         log.msg('%r authenticated with %r' % (self.state.username, None))
-        self.succeedAuth(service)
+        self.succeedAuth()
 
 class KeyboardInteractiveStateMachine(object):
-    def __init__(self, auth, username):
+    def __init__(self, auth, username, is_known):
         """
         Constructor. Pass in a method that this state machine can use to ask the user questions.
         """
         self.auth = auth
 
         # Get the generator that forms our state machine
-        self._state = self._interactive(username)
+        # There's one for existing users and one for new users
+        self._state = self._existing(username) if is_known else self._new_user(username)
 
         # Invoke its first run
         auth.askQuestions( self._state.next() )
@@ -349,14 +431,18 @@ class KeyboardInteractiveStateMachine(object):
     def __call__(self, responses=[]):
         self.responses = responses
         try:
-            self.auth.askQuestions( self._state.next() )
+            val = self._state.next()
+            if val is not None:
+                self.auth.askQuestions( val )
         except StopIteration as e:
             return self._outcome
         return True
 
-    def _interactive(self, username):
+    def _new_user(self, username):
         """
-        This method is a generator. It yields messages that should be asked.
+        This method is a generator. It yields messages that should be asked
+        to a user whose username is not known.
+
         After each yield, self.responses should contain the answers to the question.
         """
         #("\033[1mWelcome, \033[36m{0}\033[39m!\033[0m I don't recognise your username.\nWould you like to \033[4mr\033[0megister, proceed as a \033[4mg\033[0muest, or \033[4mq\033[0muit?\n(r/g/q): ".format(self.state.username), False)
@@ -369,7 +455,7 @@ class KeyboardInteractiveStateMachine(object):
         
         if choice == "q":
             self.auth.send_banner("Goodbye!")
-            self.auth.noAuthLeft("Please come again soon!")
+            self.auth.disconnect_noAuthLeft("Please come again soon!")
             return
         elif choice == "g":
             yield [("Please choose a name for your temporary character: ", False)]
@@ -395,4 +481,32 @@ class KeyboardInteractiveStateMachine(object):
             name = self.responses[0]
 
             self.auth.send_banner("Sadly, character creation isn't implemented yet.")
-            self.auth.noAuthLeft("Please visit again soon!")
+            self.auth.disconnect_noAuthLeft("Please visit again soon!")
+
+    def _existing(self, username):
+        """
+        This method is a generator. It yields messages that should be asked
+        to a user whose username already exists.
+
+        After each yield, self.responses should contain the answers to the question.
+        """
+        yield [("Welcome back, {0}!\nIf you are not the person who registered this username, please connect again using a different username.\nEnter the password for {0}: ".format(username), True)]
+
+        # Check whether the password is valid
+        attempts_remaining = 3
+        self.auth.check_password(self.responses[0])
+
+        while self.auth.transport.avatar is None:
+            attempts_remaining -= 1
+            if attempts_remaining <= 0:
+                self.auth.disconnect_noAuthLeft("Too many incorrect passwords.")
+                return
+            yield [("Incorrect password, try again: ", True)]
+            self.auth.check_password(self.responses[0])
+
+        yield [("What character do you want to use: ", False)]
+        while not self.auth.transport.avatar.select_character(self.responses[0]):
+            yield [("Character not found, try again: ", False)]
+
+        self.auth.succeedAuth()
+
