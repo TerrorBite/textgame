@@ -231,12 +231,15 @@ class World(object):
         cachesize = len(self.cache)
         #self.cache = [x for x in self.cache if x[1] > threshold]
         objects = self.live_set.copy()
+        savecount = 0
         for obj in objects:
             if obj.cachetime < threshold:
                 obj.unload() # Save and unload the object
             elif obj.dirty:
                 obj.save()
+                savecount += 1
         log(LogLevel.Trace, "Cache: Purged {0} stale objects from memory".format(len(objects)-len(self.live_set)))
+        log(LogLevel.Trace, "Cache: Saved {0} modified objects to the database".format(savecount))
 
     def get_contents(self, thing):
         """Returns a tuple of Things that the given Thing contains."""
@@ -250,6 +253,7 @@ class World(object):
 
     def save_thing(self, thing):
         #TODO: Review this function vs. calling thing.force_save()
+        # Right now, thing.force_save() just calls this method.
         # Save Thing basic info
         self.db.save_object(thing)
         # Save any modified properties of the Thing

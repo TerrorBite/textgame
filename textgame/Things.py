@@ -1,10 +1,6 @@
 from Util import log, LogLevel
 import time
 
-class NotLoaded:
-    # Unique value to represent "not loaded"
-    #TODO: Nothing seems to use this class, so delete it and see what breaks.
-    pass
 
 class Thing(object):
     """Represents a database object."""
@@ -49,6 +45,7 @@ class Thing(object):
 
     def force_save(self):
         "Forces an immediate save of this Thing to the database."
+        # The world.save_thing() will save our dirty values and props.
         self.world.save_thing(self)
 
     def __getitem__(self, key):
