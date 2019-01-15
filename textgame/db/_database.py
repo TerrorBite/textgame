@@ -141,6 +141,10 @@ class Database(object):
         Given a username and character name, get the Player object id for the character.
         """
         return self._backend.get_player_id(username, charname)
+
+    @require_connection
+    def get_user_characters(self, username):
+        return self._backend.get_user_characters(username)
         
     @require_connection
     def get_pubkeys(self, username):

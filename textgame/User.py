@@ -245,6 +245,7 @@ class User(object):
         """
         self.my_state = State.LoggedIn
         log(LogLevel.Notice, "{0}#{1} connected from {2}".format(self.player.name, self.player.id, '<unknown>'))
+        self.send_message("To disconnect, type @quit")
         # Make them look around and check their inventory
         location = self.player.parent # Get room that the player is in
         self.send_message("Welcome, {0}! You are currently in: {1}\r\n{2}".format(self.player.name, location.name, location.get_desc_for(self.player)))
