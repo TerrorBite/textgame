@@ -395,30 +395,42 @@ class SSHUser(avatar.ConchUser, User):
             # Requested character name not found
             return False
 
-    def openShell(self, trans):
+    def openShell(self, ssh_channel):
         """
         Called when a shell is opened by a user logging in via SSH or similar.
+
+        Wea are provided with a transport which is the open SSH
+        channel we will use to send and receive.
         """
         # Obtain a protocol instance. This is our custom Network.SSHServerProtocol.
         # The protocol controls the way that data is sent and received down the connection.
         # In our case, it presents a TTY-based user interface to the user, while all we care
         # about is sending lines to the user and receiving lines from them.
-        from Network import SSHServerProtocol
+        #TODO: Why isn't this import at the top?
+        #from Network import SSHServerProtocol
+        from Terminal import TermTransport
         # Get the protocol instance. The protocol is also our transport.
         #     Note that the Twisted networking model is a stack of protocols,
         #     where lower level protocols transport higher level ones.
-        self.transport = proto = SSHServerProtocol(self, *self.savedSize)
-        # Connect the protocol and the transport together (I don't really understand why
-        # it needs to be connected both ways like this, or what the wrapper does)
-        proto.makeConnection(trans)
-        trans.makeConnection(session.wrapProtocol(proto))
-        #self.send_message("Hi there!")
+
+        # The underlying transport of this User session will be a
+        # text UI which itself uses an SSH channel as its transport.
+        self.transport = TermTransport(self, *self.savedSize)
+        
+        # Connect the text UI to its transport.
+        self.transport.makeConnection(ssh_channel)
+
+        # Still don't understand why the reverse connection
+        ssh_channel.makeConnection(session.wrapProtocol(self.transport))
+
         # Obtain the Player object from the database
         player_id = self.world.db.get_player_id(self.username, self._charname)
         log.debug("Username: {0}, character: {2}, id: {1}".format(self.username, player_id, self._charname))
 
         self.player = self.world.get_thing(player_id)
-        # Finish login (what does this call do?)
+
+        # Finish login. This calls the method in the User class which sends
+        # the initial greeting, etc.
         self.complete_login()
 
     def getPty(self, term, windowSize, modes):
@@ -435,9 +447,11 @@ class SSHUser(avatar.ConchUser, User):
         This method would be called when an attempt is made to run a single
         command via SSH rather than establishing an interactive session.
 
-        We don't support this, so we raise a NotImplementedError.
+        We don't support this, so we close the connection.
         """
-        raise NotImplementedError()
+        proto.write("Your SSH client requested to execute a command. "
+                "This is not supported.\n")
+        proto.loseConnection()
 
     def closed(self):
         """

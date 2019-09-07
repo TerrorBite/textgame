@@ -38,6 +38,11 @@ class IDatabaseBackend(Interface):
         exists, and None otherwise.
         """
 
+    def create_user(self, username, password, pubkeys):
+        """
+        Creates a new user in the User table.
+        """
+
     def get_user_characters(self, username):
         """
         Given a username, this method returns a list of character

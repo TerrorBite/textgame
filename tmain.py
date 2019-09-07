@@ -16,7 +16,7 @@ except ImportError as e:
         exit(1)
     from twisted.internet import reactor, protocol, task
 
-from textgame.Network import BasicUserSession, SSHFactoryFactory
+from textgame.Network import BasicUserSession, create_ssh_factory
 
     
 
@@ -28,11 +28,14 @@ def main():
     #world.db.db_get_user('admin')
 
     log(LogLevel.Debug, "Setting up ServerFactory")
+
+    # Set up server factory for plaintext.
     factory = protocol.ServerFactory()
     factory.protocol = BasicUserSession
     reactor.listenTCP(8888, factory)
 
-    reactor.listenTCP(8822, SSHFactoryFactory(world))
+    # Set up server factory for SSH access.
+    reactor.listenTCP(8822, create_ssh_factory(world))
     log(LogLevel.Notice, 'Now listening for connections.')
     log(LogLevel.Debug, 'Launching reactor.run() main loop')
 

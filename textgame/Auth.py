@@ -30,10 +30,16 @@ class SSHRealm:
 
     def doesAvatarExist(self, avatarId):
         """
-        Returns True if this avatar ID is valid, otherwise false.
+        Returns whether this avatar ID exists in the Realm.
         """
         # Query the database as to whether the username exists.
         return self.world.db.username_exists(avatarId)
+
+    def createAvatar(self, avatarId, password, pubkeys=()):
+        """
+        Requests that this Realm should create a new user in the realm.
+        """
+        self.world.db.create_user(avatarId, password, pubkeys)
 
     def requestAvatar(self, avatarId, mind, *interfaces):
         """
@@ -480,6 +486,7 @@ class KeyboardInteractiveStateMachine(object):
             yield [("Choose a name for your first character: ", False)]
             name = self.responses[0]
 
+            #TODO: register
             self.auth.send_banner("Sadly, character creation isn't implemented yet.")
             self.auth.disconnect_noAuthLeft("Please visit again soon!")
 
