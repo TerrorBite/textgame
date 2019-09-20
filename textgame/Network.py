@@ -6,10 +6,9 @@ from twisted.conch.ssh import factory as conch_factory
 from twisted.conch.ssh import userauth, connection, keys, session
 from twisted.conch.ssh.address import SSHTransportAddress
 
-from Util import log, LogLevel, enum
+from textgame.Util import log, LogLevel, enum
 
-import World
-import Things
+from textgame import World, Things
 from User import SSHUser, IUserProtocol, State
 from Auth import SSHRealm, UserAuthService
 

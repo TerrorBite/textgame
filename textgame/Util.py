@@ -1,9 +1,43 @@
 import time, inspect
+from enum import Enum
+import logging;
+
+def setup_logging(level=logging.INFO):
+    """
+    Logging is set up, and also extended with new log levels.
+    New log levels are annotated below with a plus sign.
+
+     FATAL......The application cannot continue. Also called CRITICAL.
+     ERROR......A serious, but recoverable error has occurred.
+     WARNING....An unusual condition has occurred that requires attention.
+     INFO.......Messages about important, but normal events in the program's life.
+    +VERBOSE....Messages about normal events of lesser importance occurring in the program.
+     DEBUG......More detailed, frequent messages, only useful while debugging.
+    +TRACE......Extremely noisy, may output debug values at almost every step.
+    """
+    VERBOSE = logging.INFO - 5;
+    logging.addLevelName(VERBOSE, 'VERBOSE')
+    TRACE = logging.DEBUG - 5;
+    logging.addLevelName(TRACE, 'TRACE')
+
+    class Logger(logging.getLoggerClass()):
+        def trace(self, msg, *args, **kwargs):
+            self.log(TRACE, msg, *args, **kwargs)
+        def verbose(self, msg, *args, **kwargs):
+            self.log(VERBOSE, msg, *args, **kwargs)
+
+    logging.setLoggerClass(Logger)
+    logging.basicConfig(level=level)
+    logging.getLogger('Util').verbose("Logging initialised.")
 
 def enum(*args, **named):
     """enum class factory.
 
-    Provides easy enumerated types in Python. An enumeration is defined as follows:
+    Provides easy enumerated types in Python < 3.4. In Python >= 3.4,
+    please consider using the standard enum.Enum class.
+    See https://docs.python.org/3/library/enum.html
+
+    An enumeration is defined as follows:
         
         Animals = enum('Cow', 'Pig', 'Sheep', 'Chicken')
         Coins = enum(Penny=1, Nickle=5, Dime=10, Quarter=25)
@@ -64,7 +98,9 @@ def enum(*args, **named):
                 return (s, n)[x]
             def __hash__(self): return h+n
             def __eq__(self, other): return other is self or other == n
+            @property
             def name(self): return s
+            @property
             def value(self): return n
         return EnumValue
 
@@ -117,7 +153,7 @@ Definitions:
 
     Trace: Intended for in-depth debugging. Used to log every detail of program operation to track down program errors.
 """
-LogLevel = enum('Trace', 'Debug', 'Info', 'Notice', 'Warn', 'Error', 'Fatal')
+LogLevel = Enum('LogLevel', ('Trace', 'Debug', 'Info', 'Notice', 'Warn', 'Error', 'Fatal'))
 
 _loglevel = LogLevel.Info
 
@@ -131,7 +167,7 @@ def log(level, message):
     if level < _loglevel:
         #print level, loglevel
         return
-    log_level_name = level.name().upper() if isinstance(level, enum.EnumValue) else "OTHER"
+    log_level_name = level.name.upper() if isinstance(level, LogLevel) else "OTHER"
     if _loglevel <= LogLevel.Debug:
         frm = inspect.stack()[1]
         mod = inspect.getmodule(frm[0])
@@ -143,7 +179,7 @@ def log(level, message):
 
 # Handy aliases: log.warn(), log.error(), etc
 for level in LogLevel:
-    setattr(log, level.name().lower(), log.__get__(level, level.__class__))
+    setattr(log, level.name.lower(), log.__get__(level, level.__class__))
 
 def pip_install(*packages):
     try:
@@ -152,6 +188,10 @@ def pip_install(*packages):
         log(LogLevel.Error, "The following packages are required:\r\n    {0}".format(', '.join(packages)))
         return False
 
+    if not hasattr(pip, 'utils'):
+        log(LogLevel.Error, "The following packages are required:\r\n    {0}".format(', '.join(packages)))
+        return False
+        
     if pip.utils.ask("The following packages are required:\r\n    {0}\r\n"\
             "Do you want me to install them locally using pip? (yes/no): "
             .format(', '.join(packages)) , ['yes', 'no']) == 'no': return False
