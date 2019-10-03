@@ -19,12 +19,12 @@ except ImportError as e:
     from twisted.internet import reactor, protocol, task
 
 from textgame.Network import BasicUserSession, create_ssh_factory
+from textgame.World import World
 
     
 
 def main():
 
-    from textgame import World
     log.info('Initializing world...')
     world = World("Sqlite", "world.db")
 

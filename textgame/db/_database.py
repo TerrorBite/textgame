@@ -8,18 +8,20 @@ __all__ = ["Database", "DBType"]
 
 # System imports
 import hashlib, struct, random, time, functools
+from enum import Enum
 
 # Local imports
 from textgame.db import backends, IDatabaseBackend
 from textgame.Things import *
-from textgame.Util import enum, log, LogLevel
+from textgame.Util import log, LogLevel
 
 # 1. This is the master list of Thing types as used in the database.
 # DO NOT CHANGE THE ORDER OF THIS LIST as it will break existing databases.
 thingtypes = [Room, Player, Item, Action, Script]
 
 # 2. Generate enum from the above list
-DBType = enum(*[t.__name__ for t in thingtypes])
+#DBType = enum(*[t.__name__ for t in thingtypes])
+DBType = Enum("DBType", [t.__name__ for t in thingtypes])
 
 # 3. Attach dbtype to classes
 for t in thingtypes:

@@ -8,8 +8,8 @@ import sqlite3
 from zope.interface import implementer
 
 from textgame.db import IDatabaseBackend
+from textgame.db.backends.schema.SqliteSchema import Schema
 from textgame.Util import log
-from schema.SqliteSchema import Schema
 
 class Cursor(object):
     """

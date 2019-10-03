@@ -10,9 +10,10 @@ import struct
 from base64 import b64encode
 
 # Our imports
-from Util import log
-from User import SSHUser
+from textgame.Util import log
+from textgame.User import SSHUser
 
+@implementer(portal.IRealm)
 class SSHRealm:
     """
     This simple realm generates User instances.
@@ -20,10 +21,7 @@ class SSHRealm:
     This is basically a factory for SSHUser instances. After SSH authentication
     has succeeded, the SSHRealm is provided with the username of the account that
     just logged in, and uses it to create and return an appropriate User instance.
-
-    This is an old-style class because Twisted doesn't use new-style classes.
     """
-    implements(portal.IRealm)
 
     def __init__(self, world):
         self.world = world

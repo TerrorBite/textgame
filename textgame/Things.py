@@ -1,4 +1,4 @@
-from Util import log, LogLevel
+from textgame.Util import log, LogLevel
 import time
 
 

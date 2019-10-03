@@ -1,4 +1,4 @@
-from zope.interface import implements, implementer
+from zope.interface import implementer
 
 from twisted.internet import protocol
 from twisted.conch.checkers import SSHPublicKeyChecker
@@ -9,11 +9,11 @@ from twisted.conch.ssh.address import SSHTransportAddress
 from textgame.Util import log, LogLevel, enum
 
 from textgame import World, Things
-from User import SSHUser, IUserProtocol, State
-from Auth import SSHRealm, UserAuthService
+from textgame.User import SSHUser, IUserProtocol, State
+from textgame.Auth import SSHRealm, UserAuthService
 
+@implementer(IUserProtocol)
 class BareUserProtocol(protocol.Protocol):
-    implements(IUserProtocol)
     """
     Processes a basic user session - a raw connection with no UI presented to the user.
     """

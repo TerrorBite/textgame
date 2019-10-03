@@ -1,4 +1,4 @@
 
 # Import each backend.
 
-from Sqlite import Sqlite
+from textgame.db.backends.Sqlite import Sqlite

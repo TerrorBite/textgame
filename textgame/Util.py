@@ -1,6 +1,6 @@
 import time, inspect
 from enum import Enum
-import logging;
+import logging
 
 def setup_logging(level=logging.INFO):
     """
@@ -153,9 +153,18 @@ Definitions:
 
     Trace: Intended for in-depth debugging. Used to log every detail of program operation to track down program errors.
 """
+# Note: This is unused with the current logging setup, which uses new log levels.
 LogLevel = Enum('LogLevel', ('Trace', 'Debug', 'Info', 'Notice', 'Warn', 'Error', 'Fatal'))
 
-_loglevel = LogLevel.Info
+class LogMessage:
+    def __init__(self):
+
+def log(level, message):
+    frm = inspect.stack()[1]
+    mod = inspect.getmodule(frm[0])
+    logger = logging.getLogger(mod.__name__)
+    # TODO: Format log appropriately
+    logger.log(level, LogMessage(message))
 
 def setLogLevel(level):
     "Sets the logging level."
@@ -163,7 +172,8 @@ def setLogLevel(level):
     _loglevel = level
 
 import sys
-def log(level, message):
+_loglevel = LogLevel.Info
+def old_log(level, message):
     if level < _loglevel:
         #print level, loglevel
         return

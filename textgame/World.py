@@ -2,8 +2,8 @@
 #from SqliteDB import SqliteDatabase as Database
 
 from textgame.db import DBType, Database
-from Things import Thing
-from Util import log, LogLevel
+from textgame.Things import Thing
+from textgame.Util import log, LogLevel
 from twisted.internet import task
 import time
 

@@ -1,16 +1,18 @@
 
 from zope.interface import implementer, Interface
 
+from enum import Enum
+
 
 from twisted.conch import avatar
 from twisted.conch.interfaces import ISession
 from twisted.conch.ssh import session
 from twisted.conch.insults import insults
 
-from Util import enum, log, LogLevel
-import World, Things
+from textgame.Util import log, LogLevel
+from textgame import World, Things
 
-State = enum('New', 'LoggedIn')
+State = Enum('State', ['New', 'LoggedIn'])
 
 prelogincmds = []
 commands = {}
@@ -332,7 +334,7 @@ class User(object):
                     "{0}#{1}".format(self.player.name, self.player.id) if self.player else self.transport.getHost().host,
                     words[0], "({0})".format(', '.join(params) if (words[0] not in ('connect', '@connect')) else '[redacted]')
                     if params else ''))
-            except TypeError, e:
+            except TypeError as e:
                 log(LogLevel.Trace, "words: {0}, params: {1}".format(repr(words), repr(params)))
                 log(LogLevel.Trace, "Exception: {0}".format(repr(e)))
             commands[words[0]](self, params)
