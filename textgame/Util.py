@@ -15,20 +15,25 @@ def setup_logging(level=logging.INFO):
      DEBUG......More detailed, frequent messages, only useful while debugging.
     +TRACE......Extremely noisy, may output debug values at almost every step.
     """
-    VERBOSE = logging.INFO - 5;
-    logging.addLevelName(VERBOSE, 'VERBOSE')
-    TRACE = logging.DEBUG - 5;
-    logging.addLevelName(TRACE, 'TRACE')
+    # Add VERBOSE level (between VERBOSE and INFO)
+    logging.VERBOSE = logging.INFO - 5;
+    logging.addLevelName(logging.VERBOSE, 'VERBOSE')
+
+    #Add TRACE level (below DEBUG)
+    logging.TRACE = logging.DEBUG - 5;
+    logging.addLevelName(logging.TRACE, 'TRACE')
 
     class Logger(logging.getLoggerClass()):
         def trace(self, msg, *args, **kwargs):
-            self.log(TRACE, msg, *args, **kwargs)
+            self.log(logging.TRACE, msg, *args, **kwargs)
         def verbose(self, msg, *args, **kwargs):
-            self.log(VERBOSE, msg, *args, **kwargs)
+            self.log(logging.VERBOSE, msg, *args, **kwargs)
 
     logging.setLoggerClass(Logger)
     logging.basicConfig(level=level)
-    logging.getLogger('Util').verbose("Logging initialised.")
+    global logger
+    logger = logging.getLogger(__name__)
+    logger.verbose("Logging initialised.")
 
 def enum(*args, **named):
     """enum class factory.
@@ -157,13 +162,21 @@ Definitions:
 LogLevel = Enum('LogLevel', ('Trace', 'Debug', 'Info', 'Notice', 'Warn', 'Error', 'Fatal'))
 
 class LogMessage:
-    def __init__(self):
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __str__(self):
+        return self.msg
 
 def log(level, message):
     frm = inspect.stack()[1]
     mod = inspect.getmodule(frm[0])
     logger = logging.getLogger(mod.__name__)
     # TODO: Format log appropriately
+    try:
+        level = getattr(logging, level.name.upper())
+    except AttributeError as e:
+        level = logging.DEBUG
     logger.log(level, LogMessage(message))
 
 def setLogLevel(level):
@@ -211,6 +224,8 @@ def pip_install(*packages):
 
 def super_init(*args, **kwargs):
     """
+    Has little use in Python 3, where super() takes no args.
+
     When called from within a class __init__ function, will call the __init__ of the FIRST parent class only.
     """
     "The frame that called us."

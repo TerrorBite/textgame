@@ -76,3 +76,13 @@ class IDatabaseBackend(Interface):
         """
 
 
+def find_backends():
+    """
+    This function locates classes within the "backends" package
+    which claim to implement the IDatabaseBackend interface.
+
+    It will return a list of those classes.
+    """
+    #First, load the backends
+
+

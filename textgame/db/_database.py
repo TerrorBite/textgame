@@ -7,13 +7,23 @@ This file provides the Database class and the DBType enum.
 __all__ = ["Database", "DBType"]
 
 # System imports
-import hashlib, struct, random, time, functools
+import hashlib
+import struct
+import random
+import time
+import functools
+import types
+import logging
 from enum import Enum
+
+from zope.interface import verify
+from zope.interface.exceptions import Invalid
 
 # Local imports
 from textgame.db import backends, IDatabaseBackend
 from textgame.Things import *
-from textgame.Util import log, LogLevel
+
+logger = logging.getLogger(__name__)
 
 # 1. This is the master list of Thing types as used in the database.
 # DO NOT CHANGE THE ORDER OF THIS LIST as it will break existing databases.
@@ -26,6 +36,23 @@ DBType = Enum("DBType", [t.__name__ for t in thingtypes])
 # 3. Attach dbtype to classes
 for t in thingtypes:
     t.dbtype = DBType[t.__name__]
+
+def _get_backends():
+    modules = (m for k, m in vars(backends).items() if isinstance(m, types.ModuleType))
+    classes = {cls for mod in modules for cls in vars(mod).values()
+            if isinstance(cls, type) and IDatabaseBackend.implementedBy(cls)}
+
+    # Validate classes
+    for cls in tuple(classes):
+        try:
+            verify.verifyClass(IDatabaseBackend, cls)
+        except Invalid as e:
+            classes.remove(cls)
+            logger.warn(f"Backend {cls!r} is not usable, it will not be available.")
+            logger.warn(f"'{cls.__name__}' is not valid as a backend: {e!s}")
+    if not classes:
+        logger.critical("No database backends are available.")
+    return {cls.__name__: cls for cls in classes}
 
 def Thing_of_type(dbtype):
     """
@@ -86,6 +113,8 @@ class Database(object):
 
     Requires a database backend class to operate.
     """
+    backends = _get_backends()
+
     def __init__(self, backend, conn_string):
         """
         Instantiates the Database.
@@ -95,11 +124,15 @@ class Database(object):
         second parameter is an arbitrary string which has meaning to
         the backend class, telling it how to connect to a database.
         """
-        # This will raise AttributeError if backend doesn't exist
-        backend_cls = getattr(backends, backend)
+        # This will raise KeyError if backend doesn't exist
+        try:
+            backend_cls = self.backends[backend]
+        except KeyError as e:
+            raise Exception("Requested backend is not available") from e
         if not IDatabaseBackend.implementedBy(backend_cls):
             raise RuntimeError("The named backend class does not implement IDatabaseBackend.")
         self._backend = backend_cls(conn_string)
+        verify.verifyObject(IDatabaseBackend, self._backend)
         self.active = True
 
     def close(self):

@@ -7,15 +7,15 @@ import re
 from functools import wraps
 import inspect
 
-re_interscript = re.compile(ur'{(\[.*?[^\\]\]|<.*?[^\\]>)}')
+re_interscript = re.compile(r'{(\[.*?[^\\]\]|<.*?[^\\]>)}')
 #re_interscript = re.compile(ur'{(\[.*?[^\\]\])}')
 #re_ivariable = re.compile(ur'{(<.*?[^\\]>)}')
 
-re_special = re.compile(ur'[][<]')
-re_unescape = re.compile(ur'\\([][<>{}\\])')
-re_funcname = re.compile(ur'\[(\w+)([]:])')
+re_special = re.compile(r'[][<]')
+re_unescape = re.compile(r'\\([][<>{}\\])')
+re_funcname = re.compile(r'\[(\w+)([]:])')
 
-EMPTY = u''
+EMPTY = ''
 
 funchandlers = {}
 class funcHandler:
@@ -32,9 +32,11 @@ class funcHandler:
 
 class InterscriptException(Exception):
     def __init__(self, *args):
-        super(InterscriptException, self).__init__(*args)
+        super().__init__(*args)
         frames = inspect.stack()
-        self._head = '    '+[x[0].f_locals['result'].source() for x in frames if x[3] == 'repl'][0]
+        for x in frames:
+            print(f"{x[3]}: {x[0].f_locals!r}")
+        self._head = '    '+[x[0].f_locals['result'].source() if 'result' in x[0].f_locals else '???' for x in frames if x[3] == 'repl'][0]
         self._stack = [(x['func'].name, '?', '?', x['params'][1:][0].source()) for x in (f[0].f_locals for f in frames if f[3] == 'wrapper')]
         del frames
     def __str__(self):
@@ -80,7 +82,7 @@ class ResolvableText(object):
         Any callables embedded within the ResolvableText will be called, and the return value substituted into the string.
         """
         self.resolved = EMPTY.join([x() if callable(x) else x for x in self.parts])
-        print repr(self), "=>", self.resolved
+        print(repr(self), "=>", self.resolved)
         return self.resolved
 
     def source(self):
@@ -205,6 +207,8 @@ class Parser(object):
         assert source[0] == '['
 
         m = re_funcname.match(source)
+        if m is None:
+            raise InterscriptException("Invalid syntax", self.func_stack)
         funcname = m.group(1)
         consumed = m.end()
 
@@ -310,7 +314,7 @@ class Parser(object):
 
     @funcHandler('lit', resolve_params=False)
     def func_lit(self, *values):
-        return u','.join([v.source() for v in values])
+        return','.join([v.source() for v in values])
 
     @funcHandler('repeat', resolve_params=False)
     def func_repeat(self, count, value):
@@ -367,12 +371,12 @@ if __name__ == '__main__':
     #test_strings.append(' '.join(test_strings))
 
     for test in test_strings:
-        print "INPUT : " + repr(test)
-        print "OUTPUT: " + repr(p.parse(test))
+        print("INPUT : " + repr(test))
+        print("OUTPUT: " + repr(p.parse(test)))
     try:
-        print "Enter further test lines, Ctrl-C to end"
+        print("Enter further test lines, Ctrl-C to end")
         while True:
-            print "=> " + p.parse(raw_input("<= "))
+            print("=>", p.parse(input("<= ")))
     except KeyboardInterrupt:
         pass
 

@@ -116,7 +116,8 @@ class UserAuthService(service.SSHService):
       keyboard-interactive method is used to offer the user a
       chance to register an account.
     - Unknown users who offered an SSH pubkey during authentication
-      will be asked if they wish to use that key to authenticate in future.
+      will be asked if they wish to use that key to authenticate in
+      future.
     - Known users will be authenticated via pubkey, password, or
       keyboard-interactive.
     - Known users will be asked which character they want to play.
@@ -183,6 +184,8 @@ class UserAuthService(service.SSHService):
         """
         self.packet_count += 1
         user, nextService, method, rest = getNS(packet, 3)
+        user = user.decode('utf-8')
+        method = method.decode('ascii')
         if self.isBadUsername(user): return
         first = False
         if self.state is None or self.state.is_invalid( user, nextService ):
@@ -296,19 +299,19 @@ class UserAuthService(service.SSHService):
         except:
             #d.errback(failure.Failure())
             pass
-        self.state.continue_interactive(resp)
+        self.state.continue_interactive([r.decode('utf-8') for r in resp])
     
     def askQuestions(self, questions):
         resp = []
         for message, isPassword in questions:
-            resp.append((message, 0 if isPassword else 1))
+            resp.append((message, b'\0' if isPassword else b'\x01'))
+        # TODO: document why we start with these
         packet = NS('') + NS('') + NS('')
         packet += struct.pack('>L', len(resp))
         for prompt, echo in resp:
-            packet += NS(prompt)
-            packet += chr(echo)
+            packet += NS(prompt) + echo
         self.transport.sendPacket(userauth.MSG_USERAUTH_INFO_REQUEST, packet)
-        log.debug("Asked the user questions")
+        log.debug("Asked the user a question")
 
     def doGuestLogin(self):
         """
@@ -335,13 +338,17 @@ class UserAuthService(service.SSHService):
         This invokes the credentials checker that's registered for this instance.
         """
         # Create a username/password pair and try to log in with it
+        log.debug(f"Checking username/password pair {self.state.username}, {password}")
         creds = credentials.UsernamePassword( self.state.username, password )
         deferred = self.portal.login( creds, None, IConchUser )
         def finished(result):
             # Auth succeeded
             _, self.transport.avatar, self.transport.logoutFunction = result
+            log.debug(f"Auth callback: success")
         def failed(result):
+            log.debug(f"Auth callback: failed")
             pass
+        #TODO: How do deferred? Can we make this async?
         deferred.addCallback( finished )
         deferred.addErrback( failed )
 
@@ -364,7 +371,7 @@ class UserAuthService(service.SSHService):
         authentication. If omitted, this parameter defaults to False.
         """
         self.transport.sendPacket(userauth.MSG_USERAUTH_FAILURE,
-                NS(','.join(self.supportedAuthentications)) + ('\xff' if partial else '\x00'))
+                NS(','.join(self.supportedAuthentications)) + (b'\xff' if partial else b'\0'))
 
     def disconnect_noAuthLeft(self, msg):
         """
@@ -428,14 +435,14 @@ class KeyboardInteractiveStateMachine(object):
         self._state = self._existing(username) if is_known else self._new_user(username)
 
         # Invoke its first run
-        auth.askQuestions( self._state.next() )
+        auth.askQuestions( next(self._state) )
 
         self._outcome = False
 
     def __call__(self, responses=[]):
         self.responses = responses
         try:
-            val = self._state.next()
+            val = next(self._state)
             if val is not None:
                 self.auth.askQuestions( val )
         except StopIteration as e:
@@ -499,6 +506,7 @@ class KeyboardInteractiveStateMachine(object):
 
         # Check whether the password is valid
         attempts_remaining = 3
+        #TODO:Something about deferreds
         self.auth.check_password(self.responses[0])
 
         while self.auth.transport.avatar is None:

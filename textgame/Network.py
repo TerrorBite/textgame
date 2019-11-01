@@ -1,3 +1,6 @@
+import socket
+import struct
+
 from zope.interface import implementer
 
 from twisted.internet import protocol
@@ -11,6 +14,13 @@ from textgame.Util import log, LogLevel, enum
 from textgame import World, Things
 from textgame.User import SSHUser, IUserProtocol, State
 from textgame.Auth import SSHRealm, UserAuthService
+
+def ip2int(ip_addr: str) -> int:
+    return struct.unpack("!I", socket.inet_aton(ip_addr))[0]
+
+def int2ip(n: int) -> str:
+    return socket.inet_ntoa(struct.pack("!I", addr))
+
 
 @implementer(IUserProtocol)
 class BareUserProtocol(protocol.Protocol):
@@ -116,11 +126,12 @@ def create_ssh_factory(world):
         else:
             log(LogLevel.Info, 'Successfully generated SSH host keys')
             
-    publicKey = file('host_rsa.pub', 'r').read()
-    privateKey = file('host_rsa', 'r').read()
+    publicKey = open('host_rsa.pub', 'rb').read()
+    privateKey = open('host_rsa', 'rb').read()
 
     # Global ban list shared by all factories.
-    banlist = []
+    # TODO: persist this
+    banlist = set([])
 
     from textgame.db import Credentials
     from twisted.cred.portal import Portal
@@ -139,14 +150,14 @@ def create_ssh_factory(world):
         Portal that is stored in the portal attribute.
         """
         publicKeys = {
-                'ssh-rsa': keys.Key.fromString(data=publicKey)
+                b'ssh-rsa': keys.Key.fromString(data=publicKey)
                 }
         privateKeys = {
-                'ssh-rsa': keys.Key.fromString(data=privateKey)
+                b'ssh-rsa': keys.Key.fromString(data=privateKey)
                 }
         services = {
-                'ssh-userauth': UserAuthService,
-                'ssh-connection': connection.SSHConnection
+                b'ssh-userauth': UserAuthService,
+                b'ssh-connection': connection.SSHConnection
                 }
 
         # We should really be getting this motd from the world instance
@@ -168,8 +179,9 @@ def create_ssh_factory(world):
 
         def buildProtocol(self, addr):
             # Reject this connection if the IP is banned.
-            if addr.host in banlist:
+            if ip2int(addr.host) in banlist:
                 log.info("Rejecting connection from banned IP {0}".format(addr.host))
+                # This will send a RST packet
                 return None
             # otherwise all good; let superclass do the rest
             log.info("Incoming SSH connection from {0}".format(addr.host))
@@ -181,7 +193,7 @@ def create_ssh_factory(world):
             """
             #TODO: Timed bans?
             log.info("Banning IP {0}".format(host))
-            banlist.append(host)
+            banlist.add(ip2int(host))
 
     return SSHFactory()
     # End of SSH host key loading code

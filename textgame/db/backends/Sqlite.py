@@ -37,8 +37,8 @@ class Cursor(object):
 
 @implementer(IDatabaseBackend)
 class Sqlite(object):
-    def __init__(self, filename):
-        self.filename = filename
+    def __init__(self, connect_string):
+        self.filename = connect_string
         log.info("Database activated: " + filename)
 
         # Sanity check sqlite version 3.6.19 or greater

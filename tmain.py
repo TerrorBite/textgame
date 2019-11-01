@@ -1,8 +1,10 @@
 #!/usr/bin/env python
-from textgame.Util import setup_logging, pip_install
+from textgame.Util import setup_logging
 import logging
+import sys
+assert sys.version_info[0] == 3, "Python 3 is required"
 
-setup_logging(logging.DEBUG)
+setup_logging(5)
 log = logging.getLogger()
 log.info("Loading...")
 
@@ -11,7 +13,7 @@ try:
 except ImportError as e:
     log.warn("Failed to load Twisted Framework.")
     # Ask the user politely about these packages
-    if pip_install('twisted', 'cryptography', 'bcrypt', 'pyasn1') == False:
+    if True:# pip_install('twisted', 'cryptography', 'bcrypt', 'pyasn1') == False:
         log.fatal("Cannot continue without the Twisted framework installed.")
         import traceback
         traceback.print_exc()
