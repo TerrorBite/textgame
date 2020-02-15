@@ -1,5 +1,8 @@
 from textwrap import dedent
 import time
+import sqlite3
+from typing import Iterable, Tuple
+
 
 class Schema(object):
     # Stores CREATE TABLE statements.
@@ -40,15 +43,17 @@ class Schema(object):
 
                 -- Enforce the five possible types of object.
                 CHECK( type >= 0 AND type <= 4 )
-            )""",
+            );
+            
+            """,
 
         "users": """
             CREATE TABLE IF NOT EXISTS users (
                 -- Stores login information about user accounts.
 
                 username TEXT PRIMARY KEY,  -- Username (is primary key)
-                password TEXT,              -- Password hash (hexadecimal)
-                salt TEXT,                  -- Salt used in hash (hexadecimal)
+                password BLOB,              -- Password hash (binary)
+                salt INTEGER,               -- Salt used in hash (64-bit signed integer)
                 email TEXT                  -- Email address
 
             )""",
@@ -136,6 +141,9 @@ class Schema(object):
             """, """
                 CREATE INDEX IF NOT EXISTS link_index ON objects(link)
                     -- Allow looking up or filtering objects by link - is this needed?
+            """, """
+                CREATE UNIQUE INDEX IF NOT EXISTS unique_character_name ON objects(name COLLATE NOCASE) WHERE type=1
+                    -- Enforce unique character names
             """),
         
         "properties": ("""
@@ -149,18 +157,17 @@ class Schema(object):
     # This is a tuple, each item is a tuple of SQL statements.
     upgrades = (
         # Upgrade to Schema 1
-        (   "ALTER TABLE objects ADD health INTEGER",
-            "ALTER TABLE props RENAME TO properties"
-        )
+        ("ALTER TABLE objects ADD health INTEGER")
     )
 
     def __init__(self, cursor):
         self.cursor = cursor
 
-
-    def _create_table(self, tablename, values=[]):
+    def _create_table(self, tablename, values: Iterable[tuple] = None):
+        if values is None:
+            values = []
         # Execute CREATE TABLE statement
-        self.cursor.execute( dedent( self.tables[tablename] ).strip() )
+        self.cursor.execute(dedent(self.tables[tablename]).strip())
 
         if tablename in self.indices:
             # Create any indexes that this table has.
@@ -168,35 +175,34 @@ class Schema(object):
                 self.cursor.execute( dedent(item).strip() )
 
         if len(values) > 0:
-            # Make some question marks separated by commas.
-            qmarks = ','.join( ["?"] * len(values[0]) )
-            # Create insert statement.
-            insert = "INSERT OR IGNORE INTO {0} VALUES({1})".format( tablename, qmarks )
+            # Create insert statement. Make some question marks separated by commas.
+            insert = f"INSERT OR IGNORE INTO {tablename} VALUES({','.join('?'*len(values[0]))})"
             # Execute insert statement.
-            self.cursor.executemany( insert, values )
+            self.cursor.executemany(insert, values)
 
     def create(self):
         # Meta table.
-        self._create_table( "meta", [('schema_version', 0)] )
+        self._create_table("meta", [('schema_version', 0)])
 
         # 0: Universal parent room (has to be created owning itself due to constraints)
         # 1: Admin player
         now = time.time()
-        self._create_table( "objects", [
-        #    id  name           typ flg par own link  $  cre. mod. used
+        self._create_table("objects", [
+            # id name           typ flg par own link  $  cre. mod. used
             (0, 'The Universe',  0,  0,  0,  0, None, 0, now, now, now),
             (1, 'The Creator',   1,  0,  0,  1, None, 0, now, now, now),
             # Other test objects (for testing)
             (2, 'no tea',        2,  0,  1,  1,  1,   0, now, now, now),
             (3, 'west',          3,  0,  0,  1,  0,   0, now, now, now),
             (4, 'drink',         3,  0,  2,  1,  0,   0, now, now, now),
-        ] )
+            (5, 'Guest',         1,  0,  0,  5, None, 0, now, now, now)
+        ])
 
         # Update the universal room so that the admin player owns it
         self.cursor.execute("""UPDATE objects SET owner=1 WHERE id=0""")
 
         # Properties table
-        self._create_table( "properties", [
+        self._create_table("properties", [
             (0, '_/desc', "You can't hear anything, see anything, smell anything, " +
                 "feel anything, or taste anything, and you do not even know " +
                 "where you are or who you are or how you got here."),
@@ -208,9 +214,19 @@ class Schema(object):
             (4, '_/fail', "You can't drink tea that you don't have.")
         ])
 
+        self._create_table("users", [
+            ("__GUEST__", None, None, "guest@localhost"),
+            ("creator", None, None, "creator@localhost")
+        ])
+
+        self._create_table("characters", [
+            ("creator", 1),
+            ("__GUEST__", 5)
+        ])
+
         # Users table etc
-        for table in "users characters locks acls scripts deleted".split():
-            self._create_table( table )
+        for table in "locks acls scripts deleted".split():
+            self._create_table(table)
 
     def upgrade(self):
         """
@@ -218,19 +234,19 @@ class Schema(object):
         """
         # What is the current schema version of the database?
         self.cursor.execute("SELECT value FROM meta WHERE key='schema_version'")
-        current = int( self.cursor.fetchone()[0] )
+        current = int(self.cursor.fetchone()[0])
         upgrades = self.upgrades[current:]
         for upgrade in upgrades:
-            log.info( "Upgrading schema: {0} => {1}".format( current, current+1 ) )
+            log.info(f"Upgrading schema: {current} => {current+1}")
             try:
-                with cursor.connection:
+                with self.cursor.connection:
                     for statement in upgrade:
-                        self.cursor.execute( statement )
+                        self.cursor.execute(statement)
                     current += 1
-                    self.cursor.execute( "REPLACE INTO meta (key, value) VALUES ('schema_version', ?)", (current,) )
+                    self.cursor.execute("REPLACE INTO meta (key, value) VALUES ('schema_version', ?)", (current,))
             except sqlite3.IntegrityError:
                 pass
     
     def get_tables(self):
         self.cursor.execute("""SELECT name FROM sqlite_master WHERE type='table'""")
-        return [str(x[0]) for x in c.fetchall()]
+        return [str(x[0]) for x in self.cursor.fetchall()]

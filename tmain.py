@@ -1,31 +1,18 @@
 #!/usr/bin/env python
-from textgame.Util import setup_logging
-import logging
-import sys
-assert sys.version_info[0] == 3, "Python 3 is required"
-
-setup_logging(5)
-log = logging.getLogger()
-log.info("Loading...")
+from twisted.internet import reactor, protocol
 
 try:
-    from twisted.internet import reactor, protocol, task
-except ImportError as e:
-    log.warn("Failed to load Twisted Framework.")
-    # Ask the user politely about these packages
-    if True:# pip_install('twisted', 'cryptography', 'bcrypt', 'pyasn1') == False:
-        log.fatal("Cannot continue without the Twisted framework installed.")
-        import traceback
-        traceback.print_exc()
-        exit(1)
-    from twisted.internet import reactor, protocol, task
+    from textgame.Util import setup_logging, get_logger
+finally:
+    setup_logging(5)
 
 from textgame.Network import BasicUserSession, create_ssh_factory
 from textgame.World import World
 
-    
+log = get_logger("main")
+log.info("Loading...")
 
-def main():
+if __name__ == '__main__':
 
     log.info('Initializing world...')
     world = World("Sqlite", "world.db")
@@ -41,11 +28,12 @@ def main():
     reactor.listenTCP(8822, create_ssh_factory(world))
     log.info('Now listening for connections.')
 
-    def onShutdown():
+    def on_shutdown():
         log.info("Shutting down...")
         world.close()
 
-    reactor.addSystemEventTrigger('before', 'shutdown', onShutdown)
+    reactor.addSystemEventTrigger('before', 'shutdown', on_shutdown)
     reactor.run()
 
-if __name__ == '__main__': main()
+    log.info("Shutdown is complete. Exiting.")
+

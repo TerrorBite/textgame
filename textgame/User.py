@@ -1,5 +1,8 @@
-
-from zope.interface import implementer, Interface
+from twisted.conch.error import ConchError
+from twisted.conch.insults.insults import ITerminalTransport
+from twisted.internet.interfaces import ITransport
+from twisted.python.failure import Failure
+from zope.interface import implementer
 
 from enum import Enum
 
@@ -7,12 +10,18 @@ from enum import Enum
 from twisted.conch import avatar
 from twisted.conch.interfaces import ISession
 from twisted.conch.ssh import session
-from twisted.conch.insults import insults
 
 from textgame.Util import log, LogLevel
-from textgame import World, Things
+from textgame import Things
+from textgame.Terminal import TermTransport
 
-State = Enum('State', ['New', 'LoggedIn'])
+ADMINISTRATIVELY_PROHIBITED = 1
+
+
+class State(Enum):
+    New = 0
+    Logged_In = 1
+
 
 prelogincmds = []
 commands = {}
@@ -40,19 +49,6 @@ class commandHelpText(object): # Decorator
         f.helptext = self.text
         return f
 
-class IUserProtocol(Interface):
-    #TODO: Document this interface.
-    def write_line(line):
-        """
-        Sends a complete line of text to the user.
-        """
-        pass # Interface method
-
-    def resize(width, height):
-        """
-        Notify a terminal-based protocol of a change in window size.
-        """
-        pass # Interface method
 
 class Prelogin(object):
     """
@@ -101,7 +97,7 @@ class User(object):
         """
         Built in inventory command. Prints a listing of what the character is carrying.
         """
-        if self.my_state < State.LoggedIn:
+        if self.my_state.value < State.Logged_In.value:
             self.send_message("You're not connected to a character.")
             return
         self.send_message("You are carrying: {0}".format(', '.join(map(lambda x: x.name, self.player.contents))))
@@ -112,11 +108,11 @@ class User(object):
         """
         Creates a new character.
         """
-        if self.my_state > State.New:
+        if self.my_state.value > State.New.value:
             self.send_message("You are already connected.")
             return
-        _, user, passwd = line.split()
-        # TODO: more code here
+        # _, user, passwd = line.split()
+        # TODO: Deprecate this method.
         return
 
     @commandHandler('@look', 'look')
@@ -202,7 +198,7 @@ class User(object):
         This can be used when not logged in, but requires a password to do so.
         """
         log(LogLevel.Debug, "Received connect command from {0}".format(self.transport.getHost().host))
-        if self.my_state > State.New:
+        if self.my_state > State.New.value:
             #Already connected
             self.send_message("You are already connected.")
             return
@@ -245,7 +241,7 @@ class User(object):
         When this function is called, the self.player object should already
         be initialized.
         """
-        self.my_state = State.LoggedIn
+        self.my_state = State.Logged_In
         log(LogLevel.Notice, "{0}#{1} connected from {2}".format(self.player.name, self.player.id, '<unknown>'))
         self.send_message("To disconnect, type @quit")
         # Make them look around and check their inventory
@@ -264,7 +260,7 @@ class User(object):
         params = words[1:] if len(words) > 1 else []
 
         # Are we logged in?
-        if self.my_state < State.LoggedIn:
+        if self.my_state.value < State.Logged_In.value:
             # Only prelogin commands may be used
             if words[0] in prelogincmds:
                 commands[words[0]](self, params)
@@ -301,31 +297,43 @@ class User(object):
             while True:
                 log(LogLevel.Trace, "Searching {0} for {1}".format(thing.name, words[0]))
                 # Retrieve a list of Actions contained by this thing, which match the word entered
-                actions = [x for x in thing.contents if x.type is Things.Action and x.name.lower().startswith(words[0].lower())]
+                actions = [
+                    x for x in thing.contents
+                    if x.type is Things.Action and x.name.lower().startswith(words[0].lower())
+                ]
                 log(LogLevel.Trace, "{0} contains {1}, matching: {2}".format(thing, thing.contents, actions))
 
                 # Process list, and return if actions were found
-                if self.process_action_list(actions): return
+                if self.process_action_list(actions):
+                    return
 
                 log(LogLevel.Trace, "Searching {0}'s contents for {1}".format(thing.name, words[0]))
-                # Retrieve a list of Items contained by this thing, and look for Actions on them
-                actions = reduce(lambda x,y: x+y,
-                    [
-                        [action for action in item.contents
-                            if action.type is Things.Action
-                            and action.name.lower().startswith(words[0].lower())
-                        ] for item in thing.contents
-                        if item.type is Things.Item
-                    ] , [])
+
+                # Retrieve a list of Items contained by this thing, and look for Actions on them.
+                # This is to locate items that are carried by the player, or that are contained in
+                # the same room as the player, or contained in a parent room of the player's room.
+                actions = set()
+
+                # For each Item that the target thing contains:
+                for item in filter(lambda i: i.type is Things.Item, thing.contents):
+                    # For each Action on that Item:
+                    for action in filter(lambda a: a.type is Things.Action, item.contents):
+                        # If the name matches:
+                        if action.name.lower().startswith(words[0].lower()):
+                            # Then add it to the set
+                            actions.add(action)
                 log(LogLevel.Trace, "{0}'s contents contain matching: {1}".format(thing, actions))
 
                 # Process list, and return if actions were found
-                if self.process_action_list(actions): return
+                if self.process_action_list(actions):
+                    return
 
                 # Move to this Thing's parent and keep searching, unless we reached Room #0
                 # in which case we are at the root of the parent tree and we give up.
-                if thing.id == 0: break
-                else: thing = thing.parent
+                if thing.id == 0:
+                    break
+                else:
+                    thing = thing.parent
 
         # Command dispatch map. Built-in commands should be accessed this way.
         if words[0] in commands.keys():
@@ -375,7 +383,7 @@ class SSHUser(avatar.ConchUser, User):
     interfacing with a human rather than client software, so it's actually presenting
     a text-based user interface across the transport.
     """
-    
+
     def __init__(self, world, username):
         self.savedSize = ()
         # Initialize our superclasses.
@@ -383,19 +391,31 @@ class SSHUser(avatar.ConchUser, User):
         avatar.ConchUser.__init__(self)
         User.__init__(self, world, username)
         # what does the following do?
-        self.channelLookup.update({'session':session.SSHSession})
+        self.channelLookup.update({
+            b'session': session.SSHSession,
+        })
+
+    def lookupChannel(self, channelType, windowSize, maxPacket, data):
+        log(LogLevel.Debug, f"Channel type is: {channelType}")
+        return super().lookupChannel(channelType, windowSize, maxPacket, data)
 
     def select_character(self, charname):
         """
         Sets the character name which this SSHUser will access.
         """
-        chars = self.world.db.get_user_characters(self.username)
+        chars = self.character_names
+        log.debug(f"User {self.username} has the following characters: {', '.join(chars)}")
         if charname.lower() in [c.lower() for c in chars]:
             self._charname = charname
+            log.debug(f"Selected {self._charname} on {self!r}")
             return True
         else:
             # Requested character name not found
             return False
+
+    @property
+    def character_names(self):
+        return self.world.db.get_user_characters(self.username)
 
     def openShell(self, ssh_channel):
         """
@@ -410,7 +430,6 @@ class SSHUser(avatar.ConchUser, User):
         # about is sending lines to the user and receiving lines from them.
         #TODO: Why isn't this import at the top?
         #from Network import SSHServerProtocol
-        from Terminal import TermTransport
         # Get the protocol instance. The protocol is also our transport.
         #     Note that the Twisted networking model is a stack of protocols,
         #     where lower level protocols transport higher level ones.
@@ -426,6 +445,7 @@ class SSHUser(avatar.ConchUser, User):
         ssh_channel.makeConnection(session.wrapProtocol(self.transport))
 
         # Obtain the Player object from the database
+        log.debug(f"Getting Player for {self!r}")
         player_id = self.world.db.get_player_id(self.username, self._charname)
         log.debug("Username: {0}, character: {2}, id: {1}".format(self.username, player_id, self._charname))
 
@@ -444,16 +464,18 @@ class SSHUser(avatar.ConchUser, User):
         else:
             self.windowChanged(windowSize)
     
-    def execCommand(self, proto, cmd):
+    def execCommand(self, proto: session.SSHSessionProcessProtocol, cmd):
         """
         This method would be called when an attempt is made to run a single
         command via SSH rather than establishing an interactive session.
 
         We don't support this, so we close the connection.
         """
-        proto.write("Your SSH client requested to execute a command. "
-                "This is not supported.\n")
-        proto.loseConnection()
+        log.debug(f"\n{repr(proto)}\n{dir(proto)}")
+        proto.write("Your SSH client requested to execute a command. This is not supported.\n")
+        log.debug(f"Attempt to execute command: {cmd!r}")
+        proto.transport = DummyTransport()
+        proto.processEnded()
 
     def closed(self):
         """
@@ -475,3 +497,9 @@ class SSHUser(avatar.ConchUser, User):
         re-render its text-based interface at the new size.
         """
         self.transport.resize(newSize[1], newSize[0])
+
+
+class DummyTransport:
+
+    def loseConnection(self):
+        pass

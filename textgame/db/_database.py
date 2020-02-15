@@ -3,6 +3,7 @@ Internal module of textgame.db
 
 This file provides the Database class and the DBType enum.
 """
+from typing import Tuple
 
 __all__ = ["Database", "DBType"]
 
@@ -13,7 +14,6 @@ import random
 import time
 import functools
 import types
-import logging
 from enum import Enum
 
 from zope.interface import verify
@@ -21,21 +21,30 @@ from zope.interface.exceptions import Invalid
 
 # Local imports
 from textgame.db import backends, IDatabaseBackend
-from textgame.Things import *
+import textgame.Things
+from textgame.Util import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-# 1. This is the master list of Thing types as used in the database.
-# DO NOT CHANGE THE ORDER OF THIS LIST as it will break existing databases.
-thingtypes = [Room, Player, Item, Action, Script]
 
-# 2. Generate enum from the above list
-#DBType = enum(*[t.__name__ for t in thingtypes])
-DBType = Enum("DBType", [t.__name__ for t in thingtypes])
+class DBType(Enum):
+    """
+    This is the master Enum of Thing types as used in the database.
+    Do not re-order this, or existing databases will break!
+    """
+    Room = 0
+    Player = 1
+    Item = 2
+    Action = 3
+    Script = 4
 
-# 3. Attach dbtype to classes
-for t in thingtypes:
-    t.dbtype = DBType[t.__name__]
+
+# Attach dbtype to classes
+for t in DBType:
+    cls = getattr(textgame.Things, t.name)
+    cls.dbtype = t
+    t.type = cls
+
 
 def _get_backends():
     modules = (m for k, m in vars(backends).items() if isinstance(m, types.ModuleType))
@@ -48,20 +57,23 @@ def _get_backends():
             verify.verifyClass(IDatabaseBackend, cls)
         except Invalid as e:
             classes.remove(cls)
-            logger.warn(f"Backend {cls!r} is not usable, it will not be available.")
-            logger.warn(f"'{cls.__name__}' is not valid as a backend: {e!s}")
+            logger.warning(f"Backend {cls!r} is not usable, it will not be available.")
+            logger.warning(f"'{cls.__name__}' is not valid as a backend: {e!s}")
     if not classes:
         logger.critical("No database backends are available.")
     return {cls.__name__: cls for cls in classes}
+
 
 def Thing_of_type(dbtype):
     """
     Given a DBType, returns the Thing class for that type.
     """
-    return thingtypes[dbtype.value()]
+    return getattr(textgame.Things, dbtype.name)
+
 
 class DatabaseNotConnected(Exception):
     pass
+
 
 def require_connection(f):
     """
@@ -76,39 +88,45 @@ def require_connection(f):
     return wrapper
 
 
-def hash_pass(password, salt):
+def salt_to_bytes(salt: int) -> bytes:
+    return salt.to_bytes(8, 'big', signed=True)
+
+
+def hash_pass(password: str, salt: int) -> bytes:
     """
     Compute a password hash given a plaintext password and a binary salt value.
 
-    This is currently derived using RSA PBKDF2 with 4096 rounds of
-    HMAC-SHA1. This method is almost identical to that used by
-    WPA2-PSK wireless networks. Returns a 32-byte hash.
+    This is currently derived using RSA PBKDF2 with 32768 rounds of HMAC-SHA256.
 
-    Returns the raw bytes of the hash as a string. Use
-    str.encode('hex_codec') to get hexadecimal.
+    :param password: Plaintext password, as a string.
+    :param salt: A 64-bit integer to use as salt.
+    :return: The hashed value, as bytes.
     """
-    # RSA PBKDF2 (Password-Based Key Derivation Function 2)
-    # using HMAC-SHA256
-    return hashlib.pbkdf2_hmac("sha1", password, salt, 4096, 32)
+    # RSA PBKDF2 (Password-Based Key Derivation Function 2) using HMAC-SHA256
+    assert type(salt) is int, repr(type(salt))
+    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt_to_bytes(salt), 32768)
+
 
 def hash_pass_legacy(password, salt):
     # Legacy sha1 method: deprecated
     return hashlib.sha1("{0}{1}".format(salt, hashlib.sha1(password).digest())).hexdigest()
 
-def create_hash(password):
+
+def create_hash(password: str) -> Tuple[bytes, int]:
     """
     Create a password hash and matching salt for the first time.
 
     Returns the generated hash and the salt used to generate it,
     both in hexadecimal form suitable for storing in a database.
     """
-    salt = struct.pack('Q', random.getrandbits(64))
-    pwhash = hash_pass(password, salt).encode('hex_codec')
-    return pwhash, salt.encode('hex_codec')
+    salt = random.getrandbits(64)-(1 << 63)
+    pwhash = hash_pass(password, salt)
+    return pwhash, salt
 
 
 class Database(object):
     """
+    This class implements the
     Provides a high-level, logical interface to the textgame database.
 
     Requires a database backend class to operate.
@@ -153,22 +171,30 @@ class Database(object):
         the provided username, False otherwise.
         """
 
-        log.trace("Verifying PBKDF2 password hash for user {0}, password {1} (redacted)".format(username, '*'*len(password)))
+        logger.trace(f"Verifying PBKDF2 password hash for user {username}, password {'*'*len(password)} (redacted)")
 
         # Retrieve user login details
         result = self._backend.get_user(username)
         if result is None:
-            log.trace("No such user in database: {0}".format(username))
+            logger.trace(f"No such user in database: {username}")
             return False
         pwhash, salt = result
-        log.trace("Successfully retrieved hash={0}, salt={1} from database".format(pwhash, salt))
+        if pwhash is None:
+            logger.debug(f"Hash for {username} is None, no password is set. Setting it to the entered password")
+            self._backend.set_password(username, *create_hash(password))
+            return True
+        logger.trace(f"Successfully retrieved hash={pwhash}, salt={salt} from database")
         # Hash provided password and compare with database
-        inputhash = hash_pass(password, salt.decode('hex_codec'))
-        log.trace("Hashed input password to: {0}".format(inputhash.encode('hex_codec')))
-        if pwhash.decode('hex_codec') != inputhash:
-            log.debug("Password hash mismatch for user {0}".format(username))
+        inputhash = hash_pass(password, salt)
+        if pwhash != inputhash:
+            logger.debug(f"Password hash mismatch for user {username}")
             return False
         return True
+
+    @require_connection
+    def create_account(self, username, password, charname):
+        self._backend.set_password(username, *create_hash(password))
+        self._backend.create_character(username, charname)
 
     @require_connection
     def get_player_id(self, username, charname):
@@ -208,17 +234,17 @@ class Database(object):
         """
         result = self._backend.load_object(obj)
         if result is None:
-            log.error("The id #{0} does not exist in the database!".format(obj))
+            logger.error(f"The id #{obj} does not exist in the database!")
             return None
         try:
             obtype = DBType(result[0])
         except IndexError as e:
             raise ValueError("Unknown DBType {0} while loading #{1} from the database!".format(result[0], obj))
 
-        log.debug( "We loaded {1}#{0} (type={2}) out of the database!".format(result[1], obj, obtype))
+        logger.debug(f"We loaded {obj}#{result[1]} (type={obtype}) out of the database!")
 
         # Create Thing instance
-        newobj = Thing_of_type(obtype)(world, obj, *result[1:])
+        newobj = obtype.type(world, obj, *result[1:])
 
         #log.debug("Database.load_object(): Returning {0}".format(repr(newobj)))
         return newobj

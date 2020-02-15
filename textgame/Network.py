@@ -1,25 +1,33 @@
 import socket
 import struct
+from typing import List, Tuple, Dict
 
 from zope.interface import implementer
 
 from twisted.internet import protocol
 from twisted.conch.checkers import SSHPublicKeyChecker
 from twisted.conch.ssh import factory as conch_factory
-from twisted.conch.ssh import userauth, connection, keys, session
+from twisted.conch.ssh import connection, keys
 from twisted.conch.ssh.address import SSHTransportAddress
 
-from textgame.Util import log, LogLevel, enum
+from textgame.Util import get_logger
 
-from textgame import World, Things
-from textgame.User import SSHUser, IUserProtocol, State
+from textgame.User import State
+from textgame.interfaces import IUserProtocol
 from textgame.Auth import SSHRealm, UserAuthService
+
+logger = get_logger(__name__)
+
 
 def ip2int(ip_addr: str) -> int:
     return struct.unpack("!I", socket.inet_aton(ip_addr))[0]
 
+
 def int2ip(n: int) -> str:
-    return socket.inet_ntoa(struct.pack("!I", addr))
+    """
+    Converts an integer to the string representation of an IP address.
+    """
+    return socket.inet_ntoa(struct.pack("!I", n))
 
 
 @implementer(IUserProtocol)
@@ -37,23 +45,26 @@ class BareUserProtocol(protocol.Protocol):
 
     def connectionMade(self):
         h = self.transport.getHost()
-        log(LogLevel.Info, "Incoming connection from {0}".format(h))
+        logger.info("Incoming connection from {0}".format(h))
 
     def dataReceived(self, data):
         "When data is received, process it according to state."
         if self.sshmode:
             # TODO: Is "sshmode" ever used now that everything is split out into SSHProtocol?
             self.transport.write(data)
-            if data == '\r': self.transport.write('\n')
+            if data == '\r':
+                self.transport.write('\n')
             data = data.translate('\r', '\n')
             # Split to completed lines
-            lines = filter(len, data.split('\n')) # eliminate empty lines
+            lines: List[str] = list(filter(len, data.split('\n')))  # eliminate empty lines
             lines[0] = self.buf+lines[0]
             self.buf = lines[-1]
-            for line in lines[:-1]: self.process_line(line.strip())
+            for line in lines[:-1]:
+                self.process_line(line.strip())
         else:
-            log(LogLevel.Debug, "Received data without terminating newline, buffering: {0}".format(repr(data)))
+            logger.debug("Received data without terminating newline, buffering: {0}".format(repr(data)))
             self.buf += data
+
 
 class BasicUserSession(protocol.Protocol):
     """
@@ -69,7 +80,7 @@ class BasicUserSession(protocol.Protocol):
         if type(h) is SSHTransportAddress:
             self.sshmode = True
             h = h.address
-        log(LogLevel.Info, "Incoming connection from {0}".format(h))
+        logger.info("Incoming connection from {0}".format(h))
         self.host = h.host
         if self.avatar:
             self.player = self.world.connect(self.avatar.username)
@@ -86,6 +97,72 @@ class BasicUserSession(protocol.Protocol):
             except:
                 log(LogLevel.Info, "<UNKNOWN> {0} lost connection: {1}".format(self.host, data.getErrorMessage()))
 
+
+class SSHShellOnlyConnection(connection.SSHConnection):
+    """
+    TODO: Document this
+    """
+    def getChannel(self, channelType, windowSize, maxPacket, data):
+        channel = self.transport.avatar.lookupChannel(channelType, windowSize, maxPacket, data)
+
+
+def get_rsa_server_keys() -> Tuple[keys.Key, keys.Key]:
+    """
+    Gets the SSH private and public keys, generating them if they do not exist.
+
+    :return: The private and public keys.
+    """
+    try:
+        # Load existing keys
+        return keys.Key.fromFile('host_rsa'), keys.Key.fromFile('host_rsa.pub')
+
+    except (FileNotFoundError, keys.BadKeyError):
+        # Keys need to be generated.
+        private_key, public_key = generate_rsa_server_keys()
+
+        return keys.Key.fromString(private_key), keys.Key.fromString(public_key)
+
+
+def generate_rsa_server_keys() -> Tuple[bytes, bytes]:
+    """
+    Generates SSH server keys using RSA, writes them to the correct files, then returns the bytes that were written.
+
+    This will overwrite any existing key files.
+
+    :return: The bytes of the private key, and the bytes of the public key.
+    """
+    from cryptography.hazmat.primitives import serialization as crypto_serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.backends import default_backend as crypto_default_backend
+
+    # Generate the key
+    key = rsa.generate_private_key(
+        backend=crypto_default_backend(),
+        public_exponent=65537,
+        key_size=2048
+    )
+
+    # Get the private key in the standard PEM/PKCS8 format for SSH private keys.
+    private_key = key.private_bytes(
+        crypto_serialization.Encoding.PEM,
+        crypto_serialization.PrivateFormat.PKCS8,
+        crypto_serialization.NoEncryption())
+
+    # Get the public key in the standard OpenSSH format.
+    public_key = key.public_key().public_bytes(
+        crypto_serialization.Encoding.OpenSSH,
+        crypto_serialization.PublicFormat.OpenSSH
+    )
+
+    # Write the two keys.
+    with open('host_rsa', 'wb') as f:
+        f.write(private_key)
+
+    with open('host_rsa.pub', 'wb') as f:
+        f.write(public_key)
+
+    # Return them.
+    return private_key, public_key
 
 
 def create_ssh_factory(world):
@@ -106,35 +183,17 @@ def create_ssh_factory(world):
     run more than one world on a single server.
     """
 
-    import os, sys
-    from twisted.python.procutils import which
-    if not os.path.exists('host_rsa'):
-        if not sys.platform.startswith('linux'):
-            log(LogLevel.Error, "SSH host keys are missing and I don't know how to generate them on this platform")
-            log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
-            raise SystemExit(1)
-        log(LogLevel.Warn, 'SSH host keys are missing, invoking ssh-keygen to generate them')
-        paths = which('ssh-keygen')
-        if len(paths) == 0:
-            log(LogLevel.Error, 'Could not find ssh-keygen on this system.')
-            log(LogLevel.Warn, 'Please generate the files "host_rsa" and "host_rsa.pub" for me.')
-            raise SystemExit(1)
-        ret = os.spawnl(os.P_WAIT, paths[0], 'ssh-keygen', '-q', '-t', 'rsa', '-f', 'host_rsa', '-P', '', '-C', 'textgame-server')
-        if ret != 0:
-            log(LogLevel.Error, 'Failed generating SSH host keys. Is ssh-keygen installed on this system?')
-            raise SystemExit(1)
-        else:
-            log(LogLevel.Info, 'Successfully generated SSH host keys')
-            
-    publicKey = open('host_rsa.pub', 'rb').read()
-    privateKey = open('host_rsa', 'rb').read()
-
     # Global ban list shared by all factories.
     # TODO: persist this
-    banlist = set([])
+    ban_list = set([])
+
+    # Get the keys we will need.
+    private_key, public_key = get_rsa_server_keys()
 
     from textgame.db import Credentials
     from twisted.cred.portal import Portal
+
+    # noinspection PyPep8Naming
     class SSHFactory(conch_factory.SSHFactory):
         """
         Factory responsible for generating SSHSessions.
@@ -149,51 +208,66 @@ def create_ssh_factory(world):
         The built-in classes are configured via the
         Portal that is stored in the portal attribute.
         """
-        publicKeys = {
-                b'ssh-rsa': keys.Key.fromString(data=publicKey)
-                }
-        privateKeys = {
-                b'ssh-rsa': keys.Key.fromString(data=privateKey)
-                }
-        services = {
-                b'ssh-userauth': UserAuthService,
-                b'ssh-connection': connection.SSHConnection
-                }
 
-        # We should really be getting this motd from the world instance
-        bannerText = "HERE BE DRAGONS!\nThis software is highly experimental." + \
-        "Try not to break it.\nDebug logging is enabled. DO NOT enter any real passwords!\n"
+        services = {
+            b'ssh-userauth': UserAuthService,
+            b'ssh-connection': connection.SSHConnection
+        }
 
         # This Portal is the conduit through which we authenticate users.
         # The SSHRealm will generate user instances after auth succeeds.
+        # We pass a list of instances to the SSHRealm; the realm will use these to verify credentials
+        # which are presented by the user.
         portal = Portal(SSHRealm(world), [
-            # This checker allows the Portal to verify passwords.
-            Credentials.CredentialsChecker(world.db),
+
+            # This checker allows the Portal to verify passwords and create new users.
+            Credentials.CredentialsChecker(world),
+
             # This checker allows the Portal to verify SSH keys.
-            SSHPublicKeyChecker(
-                Credentials.AuthorizedKeystore(world.db)),
-            # This "checker" will create a new user, instead of
-            # authenticating an existing one.
-            #Database.NewUserCreator(world.db)
+            SSHPublicKeyChecker(Credentials.AuthorizedKeystore(world.db)),
         ])
 
-        def buildProtocol(self, addr):
+        def getPublicKeys(self) -> Dict[bytes, keys.Key]:
+            return {
+                b'ssh-rsa': public_key
+            }
+
+        def getPrivateKeys(self) -> Dict[bytes, keys.Key]:
+            return {
+                b'ssh-rsa': private_key
+            }
+
+        @property
+        def bannerText(self):
+            # We should really be getting this motd from the world instance
+            return "HERE BE DRAGONS!\nThis software is highly experimental." + \
+                   "Try not to break it.\nDebug logging is enabled. DO NOT enter any real passwords!\n"
+
+        def buildProtocol(self, address):
+            """
+            Build an SSHServerTransport for this connection.
+
+            :param address: A :class:`twisted.internet.interfaces.IAddress` provider, representing the IP address
+                of the client connecting to us.
+            :return: A :class:`SSHServerTransport` instance, or None if the connection should be rejected..
+            """
             # Reject this connection if the IP is banned.
-            if ip2int(addr.host) in banlist:
-                log.info("Rejecting connection from banned IP {0}".format(addr.host))
+            if ip2int(address.host) in ban_list:
+                logger.verbose("Rejecting connection from banned IP {0}".format(address.host))
                 # This will send a RST packet
                 return None
             # otherwise all good; let superclass do the rest
-            log.info("Incoming SSH connection from {0}".format(addr.host))
-            return conch_factory.SSHFactory.buildProtocol(self, addr)
+            logger.verbose("Incoming SSH connection from {0}".format(address.host))
+            return conch_factory.SSHFactory.buildProtocol(self, address)
 
-        def banHost(self, host, duration=None):
+        @staticmethod
+        def ban_host(host, duration=None):
             """
             Bans a host from connecting.
             """
-            #TODO: Timed bans?
-            log.info("Banning IP {0}".format(host))
-            banlist.add(ip2int(host))
+            # TODO: Timed bans?
+            logger.verbose("Banning IP {0}".format(host))
+            ban_list.add(ip2int(host))
 
     return SSHFactory()
     # End of SSH host key loading code

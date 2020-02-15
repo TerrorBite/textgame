@@ -6,8 +6,11 @@ from twisted.conch.insults import insults
 
 import string
 
-from User import IUserProtocol
-from Util import log, LogLevel
+from textgame.interfaces import IUserProtocol
+from textgame.Util import log, LogLevel, Loggable, get_logger
+
+logger = get_logger(__name__)
+
 
 @implementer(IUserProtocol)
 class TermTransport(insults.ServerProtocol):
@@ -28,12 +31,14 @@ class TermTransport(insults.ServerProtocol):
             self.terminalProtocol.terminalSize(width, height)
 
 
-class TextUI(recvline.HistoricRecvLine):
+class TextUI(recvline.HistoricRecvLine, Loggable):
     """
     A terminal protocol, with a separate editing area and display area.
 
     Presents a user interface for sending and receiving text.
     """
+
+    logger = logger
 
     def __init__(self, user=None, width=80, height=24):
         recvline.HistoricRecvLine.__init__(self)
@@ -98,7 +103,7 @@ class TextUI(recvline.HistoricRecvLine):
         """
         n = len(self.lineBuffer) + len(self.ps[self.pn])
         w = self.width
-        self._cpos_input(n%w, n/w)
+        self._cpos_input(n % w, n // w)
         self.lineBufferIndex = len(self.lineBuffer)
 
     #def keystrokeReceived(self, keyID, modifier):
@@ -125,15 +130,16 @@ class TextUI(recvline.HistoricRecvLine):
     def show_prompt(self):
         self.terminal.write(self.ps[self.pn])
 
-    def lineReceived(self, line):
+    def lineReceived(self, line: bytes):
+        line = line.decode("utf-8", errors="replace")
         log(LogLevel.Debug, "Received line: {0}".format(line))
         try:
             self.user.process_line(line)
-        except Exception as ex:
-            from traceback import print_exc
-            print_exc(ex)
-            self.write_line("Suddenly the dungeon collapses!! You die... (Server error)")
-            self.terminal.loseConnection()
+        except Exception as e:
+            self.logger.exception("Error while processing line")
+            self.write_line("Server error while processing input, try something else?")
+            self.write_line(f"  {type(e).__name__}: {e!s}")
+            # self.terminal.loseConnection()
         self._cpos_input()
         self.terminal.eraseToDisplayEnd()
         self.drawInputLine()

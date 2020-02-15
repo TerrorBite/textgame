@@ -7,6 +7,7 @@ This module defines IDatabaseBackend
 # Third party library imports
 from zope.interface import Interface
 
+
 class IDatabaseBackend(Interface):
     """
     This interface should be implemented by a class which knows how to
@@ -14,7 +15,7 @@ class IDatabaseBackend(Interface):
     MariaDB, or PostgreSQL.
     """
 
-    def __init__(self, connect_string):
+    def __init__(connect_string: str):
         """
         Creates this database instance. Should connect to the database when it is called.
 
@@ -25,50 +26,57 @@ class IDatabaseBackend(Interface):
         directly from a config file where the admin can put any string they need to.
         """
 
-    def close(self):
+    def close():
         """
         Cleanly close the database connection.
 
         After this is called, the instance is not expected to be usable.
         """
 
-    def get_user(self, username):
+    def get_user(username):
         """
         Given a username, this method returns a record from the User table if the user
         exists, and None otherwise.
         """
 
-    def create_user(self, username, password, pubkeys):
+    def set_password(username: str, password: bytes, salt: bytes):
         """
-        Creates a new user in the User table.
+        This method should take a username, a hashed password, and a salt, and store them for that username.
+
+        If the username does not exist, it should be created.
         """
 
-    def get_user_characters(self, username):
+    def create_character(username: str, character: str):
+        """
+        This method should create a character in the Characters table for the given username.
+        """
+
+    def get_user_characters(username):
         """
         Given a username, this method returns a list of character
         names associated with a username.
         """
 
-    def get_player_id(self, username, charname):
+    def get_player_id(username, charname):
         """
         Given a username and a character name, this method returns the
         id of the matching Player record from the Things table if the
         character exists. If it does not exist, None is returned.
         """
 
-    def get_property(self, obj, key):
+    def get_property(obj, key):
         """
         This method should return the value of the property named "key" on the object whose
         id is "obj".
         """
 
-    def set_property(self, obj, key, val):
+    def set_property(obj, key, val):
         """
         This method should set the value of the property named "key" on the object whose
         id is "obj" to the value "val".
         """
 
-    def load_object(self, obj):
+    def load_object(obj):
         """
         This method should load an object out of the database, returning the row loaded,
         with the fields in the following order:

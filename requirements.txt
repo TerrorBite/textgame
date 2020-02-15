@@ -1,0 +1,6 @@
+zope
+twisted
+cryptography
+bcrypt
+pyasn1
+packaging

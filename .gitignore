@@ -1,8 +1,18 @@
-*.pyc
+# Python 2 compiled bytecode
+*.py[cod]
+__pycache__/
+
+# Backup files
 *~
-*.swp
+*.sw[po]
+
+# Database and key files created by textgame
 *.db
 host_rsa
 host_rsa.pub
+
+# IDE configuration
 **/.vscode
 **/env/
+venv/
+.idea/

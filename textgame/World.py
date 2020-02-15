@@ -238,8 +238,10 @@ class World(object):
             elif obj.dirty:
                 obj.save()
                 savecount += 1
-        log(LogLevel.Trace, "Cache: Purged {0} stale objects from memory".format(len(objects)-len(self.live_set)))
-        log(LogLevel.Trace, "Cache: Saved {0} modified objects to the database".format(savecount))
+        purge_count = len(objects) - len(self.live_set)
+        if purge_count > 0:
+            log(LogLevel.Trace,
+                "Cache: Purged {0} stale objects from memory (saved {1})".format(purge_count, savecount))
 
     def get_contents(self, thing):
         """Returns a tuple of Things that the given Thing contains."""

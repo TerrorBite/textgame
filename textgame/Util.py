@@ -1,13 +1,29 @@
-import time, inspect
+import inspect
+import time
+import typing
 from enum import Enum
 import logging
 
+from twisted.python.log import PythonLoggingObserver
+
+LOG_FORMAT = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+
+
+class LoggerBase(logging.Logger):
+    def trace(self, msg, *args, **kwargs):
+        pass
+
+    def verbose(self, msg, *args, **kwargs):
+        pass
+
+
+# noinspection PyUnresolvedReferences
 def setup_logging(level=logging.INFO):
     """
     Logging is set up, and also extended with new log levels.
     New log levels are annotated below with a plus sign.
 
-     FATAL......The application cannot continue. Also called CRITICAL.
+     CRITICAL...The application cannot continue. Also called FATAL.
      ERROR......A serious, but recoverable error has occurred.
      WARNING....An unusual condition has occurred that requires attention.
      INFO.......Messages about important, but normal events in the program's life.
@@ -16,24 +32,93 @@ def setup_logging(level=logging.INFO):
     +TRACE......Extremely noisy, may output debug values at almost every step.
     """
     # Add VERBOSE level (between VERBOSE and INFO)
-    logging.VERBOSE = logging.INFO - 5;
+    logging.VERBOSE = logging.INFO - 5
     logging.addLevelName(logging.VERBOSE, 'VERBOSE')
 
-    #Add TRACE level (below DEBUG)
-    logging.TRACE = logging.DEBUG - 5;
+    # Add TRACE level (below DEBUG)
+    logging.TRACE = logging.DEBUG - 5
     logging.addLevelName(logging.TRACE, 'TRACE')
 
+    # noinspection PyUnresolvedReferences
     class Logger(logging.getLoggerClass()):
+
         def trace(self, msg, *args, **kwargs):
             self.log(logging.TRACE, msg, *args, **kwargs)
+
         def verbose(self, msg, *args, **kwargs):
             self.log(logging.VERBOSE, msg, *args, **kwargs)
 
     logging.setLoggerClass(Logger)
-    logging.basicConfig(level=level)
+    logging.basicConfig(level=level, format=LOG_FORMAT)
+
     global logger
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
     logger.verbose("Logging initialised.")
+
+    # Get Twisted to use our logging too
+    PythonLoggingObserver(loggerName="twisted").start()
+
+
+def get_logger(name: str) -> LoggerBase:
+    # noinspection PyTypeChecker
+    return logging.getLogger(name=name)
+
+
+def log(lvl, message):
+    frm = inspect.stack()[1]
+    mod = inspect.getmodule(frm[0])
+
+    logger = logging.getLogger(mod.__name__)
+    # TODO: Format log appropriately
+    try:
+        lvl = getattr(logging, lvl.name.upper())
+    except AttributeError:
+        lvl = logging.DEBUG
+    logger.log(lvl, LogMessage(message))
+
+
+class Loggable:
+    """
+    Inherit from this class to provide useful logging.
+    """
+
+    # Default to root logger
+    logger = logging.getLogger()
+    log_format = "{msg}"
+
+    def _format_log(self, msg):
+        """
+        Override this method to format log messages.
+        """
+        return self.log_format.format(self=self, msg=msg)
+
+    def __log(self, level, msg):
+        msg = self._format_log(msg)
+        self.logger.log(level, LogMessage(msg))
+
+    def log_trace(self, msg):
+        # noinspection PyUnresolvedReferences
+        self.__log(logging.TRACE, msg)
+
+    def log_debug(self, msg):
+        self.__log(logging.DEBUG, msg)
+
+    def log_verbose(self, msg):
+        # noinspection PyUnresolvedReferences
+        self.__log(logging.VERBOSE, msg)
+
+    def log_info(self, msg):
+        self.__log(logging.INFO, msg)
+
+    def log_warn(self, msg):
+        self.__log(logging.WARN, msg)
+
+    def log_error(self, msg):
+        self.__log(logging.ERROR, msg)
+
+    def log_critical(self, msg):
+        self.__log(logging.CRITICAL, msg)
+
 
 def enum(*args, **named):
     """enum class factory.
@@ -144,17 +229,23 @@ This enum defines log levels.
 
 Definitions:
 
-    Fatal: The program has encountered a situation where it cannot possibly continue (incompatible environment, etc) and must exit immediately.
+    Fatal: The program has encountered a situation where it cannot possibly continue (incompatible environment, etc)
+        and must exit immediately.
 
-    Error: The program has encountered an error situation which needs to be resolved. It will attempt to continue, or clean up and exit if continuing is not possible.
+    Error: The program has encountered an error situation which needs to be resolved. It will attempt to continue,
+        or clean up and exit if continuing is not possible.
 
-    Warn: The program has encountered an error which can be automatically recovered from without human intervention, though the cause of the error requires resolution. Program execution will continue.
+    Warn: The program has encountered an error which can be automatically recovered from without human intervention,
+        though the cause of the error requires resolution. Program execution will continue.
 
-    Notice: General inportant informational messages regarding changes in program state or other important events that occur during normal program operation. Can also be used for errors where the root cause of the error can be / has been automatically resolved.
+    Notice: General important informational messages regarding changes in program state or other important events
+        that occur during normal program operation. Can also be used for errors where the root cause of the error
+        can be / has been automatically resolved.
 
     Info: More detailed general informational messages about minor program events and general program flow.
 
-    Debug: Intended for debugging / detailed informational messages. Used to document internal details and the details of frequent, minor program events or flow.
+    Debug: Intended for debugging / detailed informational messages. Used to document internal details and the
+        details of frequent, minor program events or flow.
 
     Trace: Intended for in-depth debugging. Used to log every detail of program operation to track down program errors.
 """
@@ -168,16 +259,7 @@ class LogMessage:
     def __str__(self):
         return self.msg
 
-def log(level, message):
-    frm = inspect.stack()[1]
-    mod = inspect.getmodule(frm[0])
-    logger = logging.getLogger(mod.__name__)
-    # TODO: Format log appropriately
-    try:
-        level = getattr(logging, level.name.upper())
-    except AttributeError as e:
-        level = logging.DEBUG
-    logger.log(level, LogMessage(message))
+
 
 def setLogLevel(level):
     "Sets the logging level."
@@ -200,9 +282,10 @@ def old_log(level, message):
         sys.stdout.write("{0} [{1}] {2}\r\n".format(time.strftime('[%H:%M:%S]'),
             log_level_name, message) )
 
+
 # Handy aliases: log.warn(), log.error(), etc
-for level in LogLevel:
-    setattr(log, level.name.lower(), log.__get__(level, level.__class__))
+for __level in LogLevel:
+    setattr(log, __level.name.lower(), log.__get__(__level, __level.__class__))
 
 def pip_install(*packages):
     try:
