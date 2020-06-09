@@ -12,23 +12,28 @@ from twisted.internet import defer
 from twisted.cred import credentials, error as cred_error
 
 from textgame.World import World
-from textgame.interfaces import IUserAccountRequest
+from textgame.interfaces import IUsernameRequest
 
 logger = get_logger(__name__)
 
 
+# CHANGE OF PLANS.
+
+# Rather than use a standard credentials cha
+
+
 @implementer(ICredentialsChecker)
-class CredentialsChecker(object):
+class DBCredentialsChecker(object):
     """
     This class implements the ICredentialsChecker interface.
 
-    When provided with credentials which implement IUsernamePassword,
-    it will check the credentials against the database and respond
-    according to whether the check succeeded.
+    This class accepts a World instance and will check credentials against the underlying database used by that World.
+    It can handle instances which conform to the following interfaces:
 
-    This credentials checker is ONLY for checking username and
-    password; for SSH public key authentication, a standard
-    twisted.conch.checkers.SSHPublicKeyChecker should be used
+    * credentials.IUsernamePassword: Will check if the password for that user is correct.
+    * textgame.interfaces.IUsernameRequest: Will check if a username is available.
+
+    For SSH public key authentication, a standard twisted.conch.checkers.SSHPublicKeyChecker should be used
     in conjunction with our AuthorizedKeystore class.
     """
     credentialInterfaces = (
@@ -37,7 +42,7 @@ class CredentialsChecker(object):
         credentials.IUsernamePassword,
 
         # We know how to create new user accounts.
-        IUserAccountRequest
+        IUsernameRequest
     )
 
     def __init__(self, world: World):
@@ -45,17 +50,20 @@ class CredentialsChecker(object):
         self.db = world.db
         self.world = world
 
-    def requestAvatarId(self, credentials):
-        logger.trace("Asked to check credentials for {0}".format(credentials.username))
+    def requestAvatarId(self, creds):
 
-        if IUserAccountRequest.implementedBy(credentials):
-            # This is a request to create a new account
-            self.create_new_account(credentials)
+        if IUsernameRequest.providedBy(creds):
+            logger.trace("Asked to check if {0} is available".format(creds.username))
+            if self.db.username_exists(creds.username):
+                return defer.succeed(creds.username)
+            else:
+                return defer.fail(cred_error.LoginFailed("Username does not exist"))
 
         else:
+            logger.trace("Asked to check credentials for {0}".format(creds.username))
             try:
-                user = credentials.username
-                if not self.db.verify_password(user, credentials.password):
+                user = creds.username
+                if not self.db.verify_password(user, creds.password):
                     logger.info("{0} failed user authentication".format(user))
                     return defer.fail(
                         cred_error.UnauthorizedLogin("Authentication failure: No such user or bad password")
@@ -65,17 +73,6 @@ class CredentialsChecker(object):
                     return defer.succeed(user)
             except Exception:
                 logger.exception("Unable to check credentials")
-
-    def create_new_account(self, request):
-        """
-        Creates a new user account.
-
-        :param request: An instance that implements IUserAccountRequest.
-        :return: None
-        """
-        self.db.create_account(request.username, request.password, request.character)
-
-
 
 
 @implementer(IAuthorizedKeysDB)

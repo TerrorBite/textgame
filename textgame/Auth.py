@@ -1,41 +1,85 @@
 # Twisted imports
 from collections import Awaitable
+from enum import Enum, IntEnum
+from typing import NamedTuple, List, Optional, Sequence
 
 from twisted.conch import error
-from twisted.cred.credentials import IUsernamePassword
+from twisted.conch.ssh.service import SSHService
+from twisted.conch.ssh.userauth import SSHUserAuthServer
 from zope.interface import implementer
 from twisted.conch.interfaces import IConchUser
 from twisted.cred import portal, credentials
 from twisted.conch.ssh.common import NS, getNS
-from twisted.conch.ssh import service, transport, userauth
 
 # Python imports
 import struct
+import warnings
 from base64 import b64encode
 
 # Our imports
-from textgame.Util import get_logger, LogMessage, Loggable
+from textgame.Util import get_logger, Loggable
 from textgame.User import SSHUser
-from textgame.interfaces import IUserAccountRequest
+from textgame.interfaces import IUsernameRequest
 
 logger = get_logger(__name__)
 
+#: String representative of a guest user.
+GUEST_USER = "__GUEST__"
 
-@implementer(IUserAccountRequest)
-class UserAccountRequest(object):
+
+class Disconnect(NamedTuple):
+    """
+    SSH disconnect messages.
+    """
+    from twisted.conch.ssh import transport as __transport
+    HostNotAllowedToConnect = __transport.DISCONNECT_HOST_NOT_ALLOWED_TO_CONNECT
+    AuthCancelledByUser = __transport.DISCONNECT_AUTH_CANCELLED_BY_USER
+    NoMoreAuthMethodsAvailable = __transport.DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE
+    ConnectionLost = __transport.DISCONNECT_CONNECTION_LOST
+    IllegalUserName = __transport.DISCONNECT_ILLEGAL_USER_NAME
+
+
+class UserAuthMsg(NamedTuple):
+    """
+    SSH UserAuth message types.
+    """
+    from twisted.conch.ssh import userauth as __userauth
+    Request = __userauth.MSG_USERAUTH_REQUEST
+    Failure = __userauth.MSG_USERAUTH_FAILURE
+    Success = __userauth.MSG_USERAUTH_SUCCESS
+    Banner = __userauth.MSG_USERAUTH_BANNER
+    InfoResponse = __userauth.MSG_USERAUTH_INFO_RESPONSE
+    InfoRequest = __userauth.MSG_USERAUTH_INFO_REQUEST
+
+
+@implementer(IUsernameRequest)
+class UsernameRequest(object):
     """
     Represents a request to create an account.
-    """
-    def __init__(self, desired_credentials, character_name: str):
-        """
-        :param desired_credentials: An IUsernamePassword provider.
-        """
-        self.username = desired_credentials.username
-        self.password = desired_credentials.password
-        self.character = character_name
 
-    def create_account(self, database):
-        database.create_account(self, self.username, self.password, self.character)
+    :param username: The username which is desired.
+    """
+    def __init__(self, username):
+        self.username = username
+
+
+class LoginRequestData(NamedTuple):
+    """
+    Class representing data used for creating an account.
+    """
+
+    #: Specifies whether this is a guest login.
+    is_guest: bool
+
+    #: If specified, a new character with this name should be created.
+    #: If this is a guest login, this will be the name of the temporary guest character that should be created.
+    new_character: Optional[str] = None
+
+    #: If specified, this password should be used to create the new user.
+    new_password: Optional[str] = None
+
+    #: Public keys to save for this new user account, or None.
+    public_keys: Sequence[str] = None
 
 
 @implementer(portal.IRealm)
@@ -58,39 +102,48 @@ class SSHRealm:
         # Query the database as to whether the username exists.
         return self.world.db.username_exists(avatarId)
 
-    def createAvatar(self, avatarId, password, pubkeys=()):
-        """
-        Requests that this Realm should create a new user in the realm.
-        """
-        self.world.db.create_user(avatarId, password, pubkeys)
-
-    def requestAvatar(self, avatarId, mind, *interfaces):
+    def requestAvatar(self, avatarId, mind: LoginRequestData, *interfaces):
         """
         Requests that this Realm shall provide an "avatarAspect" which implements
         one of some list of interfaces. What this means for us is that we will
         create and return an SSHUser instance (which implements IConchUser).
 
-        avatarId: the username which we are getting an instance for.
-        mind: an object that implements a client-side interface for this Realm.
-            This is an object provided by our UserAuthService. We don't use this.
-        interfaces: list of interfaces that the mind is compatible with. In our
+        By the time this method is called, the user is already authenticated. This means that if the user does not
+        exist, then the user must be created.
+
+        :param avatarId: This is the username which we are getting an instance for. The avatar is what we are creating,
+            and is the business logic object for a specific user (in this case an SSHUser instance).
+        :param mind: An object that implements a client-side interface for this Realm.
+            This is an object provided by our UserAuthService. We use this to provide more information about the
+            user request.
+        :param interfaces: list of interfaces that the mind is compatible with. In our
             case this is only ever going to be IConchUser, so we don't really care.
+        :return: Should return a Deferred returning a tuple of (interface, avatarAspect, logout); actually returns the
+            tuple directly.
         """
         if IConchUser in interfaces:
             # Return a tuple of (interface, avatarAspect, logout).
             # interface: one of the interfaces passed in.
             # avatarAspect: an instance of a class that implements that interface.
             # logout: a callable which will "detach the mind from the avatar". Spooky.
+            if not self.world.db.username_exists(avatarId):
+                self.world.db.create_user(avatarId, mind.new_password, mind.public_keys or [])
+
+            if not mind.is_guest and mind.new_character is not None:
+                self.world.db.create_character(avatarId, mind.new_character)
+
             avatar = SSHUser(self.world, avatarId)
-            logout = avatar.on_logout if hasattr(avatar, "on_logout") and \
-                    callable(avatar.on_logout) else lambda: None
+
+            logout = avatar.on_logout if hasattr(avatar, "on_logout") and callable(avatar.on_logout) else lambda: None
+
+            # TODO: Deferred?
             return interfaces[0], avatar, logout
         else:
             logger.error("SSHRealm: No supported interfaces")
             raise NotImplementedError("No supported interfaces found.")
 
 
-class DebugSSHService(service.SSHService):
+class DebugSSHService(SSHService):
     """
     This replacement for the Conch SSHService simply logs
     a debug message for every packet received, with no
@@ -99,7 +152,7 @@ class DebugSSHService(service.SSHService):
     """
     def packetReceived(self, messageNum, packet):
         logger.trace(f"{self.name}: packet {messageNum} ({self.protocolMessages[messageNum]}): {packet!r}")
-        service.SSHService.packetReceived(self, messageNum, packet)
+        SSHService.packetReceived(self, messageNum, packet)
 
 
 class UserAuthState(object):
@@ -133,40 +186,46 @@ class UserAuthState(object):
         self._interactive(responses or [])
 
 
-class UserAuthService(service.SSHService, Loggable):
+class UserAuthService(SSHService, Loggable):
     """
-    The UserAuthService replaces the standard SSH authentication
-    service. This service customises the login experience in the
-    following ways:
+    The UserAuthService replaces the standard SSH authentication service. This service customises the login experience
+    in the following ways:
 
-    - Unknown usernames are not rejected, instead, the
-      keyboard-interactive method is used to offer the user a
+    - Unknown usernames are not rejected, instead, the keyboard-interactive method is used to offer the user a
       chance to register an account.
-    - Unknown users who offered an SSH pubkey during authentication
-      will be asked if they wish to use that key to authenticate in
-      future.
-    - Known users will be authenticated via pubkey, password, or
-      keyboard-interactive.
+    - Unknown users who offered an SSH pubkey during authentication will be asked if they wish to use that key
+      to authenticate in future.
+    - Known users will be authenticated via pubkey, password, or keyboard-interactive.
     - Known users will be asked which character they want to play.
     
     Additionally:
-    - On the internet, bots constantly attempt to brute-force SSH
-      server passwords. This service may include defences against
-      such connections.
+    - On the internet, bots constantly attempt to brute-force SSH server passwords. This service includes code to
+      detect and disconnect such bots.
     """
-    # Here, we completely customise the SSH login experience.
+    #: Set the logger for this Loggable subclass.
+    logger = logger
 
-    # Name of this SSH service.
+    #: Name of this SSH service.
     name = "ssh-userauth"
+    #: List of the authentications we support.
     supportedAuthentications = ["publickey", "keyboard-interactive"]
 
-    protocolMessages = userauth.SSHUserAuthServer.protocolMessages
+    #: The protocol messages we support.
+    protocolMessages = SSHUserAuthServer.protocolMessages
 
-    logger = logger
+    #: List of blacklisted usernames.
+    bad_usernames = (
+        "root",
+        # "admin",
+        "ubnt",
+        "support",
+        "user",
+        "pi"
+    )
 
     def _format_log(self, msg):
         """
-        Get an appropriate log message.
+        Get an appropriate log message (overrides Loggable formatter).
         """
         user = "" if self.state is None else f"{self.state.username}@"
         return f"[{user}{self.ip}:{self.port}] {msg}"
@@ -174,18 +233,25 @@ class UserAuthService(service.SSHService, Loggable):
     def __init__(self):
         super().__init__()
         # Begin with no state, and we can't get the portal yet.
-        self.state = None
-        self.portal = None
+        #: Object storing state for this auth flow.
+        self.state: Optional[UserAuthState] = None
+        #: The portal for our login.
+        self.portal: Optional[portal.Portal] = None
 
         # Keep track of a few values so that we can combat bots.
+        #: Tracks the total number of state changes so far.
         self.state_changes = 0
+        #: Tracks the total number of request packets so far.
         self.request_packet_count = 0
+        #: Tracks the total number of response packets so far.
         self.response_packet_count = 0
 
-        # Used for when a user logs in with their character name in the username.
+        #: Used for when a user logs in with their character name in the username.
         self.character = None
 
+        #: Stores the remote IP address.
         self.ip = "0.0.0.0"
+        #: Stores the remote port.
         self.port = 0
 
     def serviceStarted(self):
@@ -213,9 +279,6 @@ class UserAuthService(service.SSHService, Loggable):
     def serviceStopped(self):
         self.log_debug("Auth service stopping")
 
-    def is_bad_username(self, user):
-        return user.lower() in ("rooot", "ubnt", "support", "user", "pi")  # "admin" is not in this list, for now
-
     # noinspection PyPep8Naming
     def ssh_USERAUTH_REQUEST(self, packet):
         """
@@ -232,10 +295,10 @@ class UserAuthService(service.SSHService, Loggable):
         method = method.decode('ascii')
 
         # First, check if the username is allowed.
-        if self.is_bad_username(user):
+        if user.lower() in self.bad_usernames:
             self.log_info(f"Disconnecting user: blacklisted username {user}")
             self.transport.sendDisconnect(
-                transport.DISCONNECT_ILLEGAL_USER_NAME,
+                Disconnect.IllegalUserName,
                 f"You can't use that username ({user}) here. Please reconnect using a different one.")
             # self.transport.factory.banHost(self.ip)
             return
@@ -340,7 +403,8 @@ class UserAuthService(service.SSHService, Loggable):
         # Tell client that this key didn't auth them
         self.send_authFail()
 
-    def key2str(self, algo, blob):
+    @staticmethod
+    def key2str(algo, blob):
         return "{0} {1}".format(algo, b64encode(blob))
 
     def ssh_USERAUTH_INFO_RESPONSE(self, packet):
@@ -351,16 +415,17 @@ class UserAuthService(service.SSHService, Loggable):
 
         resp = []
         try:
-            numResps = struct.unpack('>L', packet[:4])[0]
+            num_resps = struct.unpack('>L', packet[:4])[0]
             packet = packet[4:]
-            while len(resp) < numResps:
+            while len(resp) < num_resps:
                 response, packet = getNS(packet)
                 resp.append(response)
             if packet:
-                #raise error.ConchError("%i bytes of extra data" % len(packet))
+                # raise error.ConchError("%i bytes of extra data" % len(packet))
                 self.log_warn("%i bytes of extra data" % len(packet))
                 # Ignore extra data
-        except:
+        except Exception:
+            # TODO: What kind of exceptions do we expect here?
             pass
         self.log_trace("Answers:"+', '.join(repr(r) for r in resp))
         self.state.continue_interactive([r.decode('utf-8') for r in resp])
@@ -375,11 +440,11 @@ class UserAuthService(service.SSHService, Loggable):
         packet += struct.pack('>L', len(resp))
         for prompt, echo in resp:
             packet += NS(prompt) + echo
-        self.transport.sendPacket(userauth.MSG_USERAUTH_INFO_REQUEST, packet)
+        self.transport.sendPacket(UserAuthMsg.InfoRequest, packet)
         self.log_debug("Asked the user a question")
         self.log_trace("Asked:\n"+'\n'.join(repr(q) for q in questions))
 
-    def doGuestLogin(self, character):
+    def do_guest_login(self, character):
         """
         Log the user in to a guest character.
         """
@@ -388,12 +453,13 @@ class UserAuthService(service.SSHService, Loggable):
         #  an avatar with IConchGuestUser or similar.
 
         # Obtain and store the avatar and logout function
+        login_data = LoginRequestData(True, character)
         (_, self.transport.avatar, self.transport.logoutFunction) = \
-            self.portal.realm.requestAvatar("__GUEST__", None, IConchUser)
+            self.portal.realm.requestAvatar(GUEST_USER, login_data, IConchUser)
 
         # Select the appropriate character on the avatar.
         if not self.transport.avatar.select_character("Guest"):
-            self.transport.sendDisconnect(transport.DISCONNECT_CONNECTION_LOST, "Error: Guest character not found")
+            self.transport.sendDisconnect(Disconnect.ConnectionLost, "Error: Guest character not found")
 
         # Finish authentication successfully
         self.succeed_auth()
@@ -409,7 +475,7 @@ class UserAuthService(service.SSHService, Loggable):
         creds = credentials.UsernamePassword(self.state.username, password)
 
         # Await the login function
-        result = await self.portal.login(creds, None, IConchUser)
+        result = await self.portal.login(creds, LoginRequestData(False), IConchUser)
 
         if result:
             # Auth succeeded
@@ -427,20 +493,25 @@ class UserAuthService(service.SSHService, Loggable):
 
     async def create_account(self, password, character_name):
         # Create a username/password pair
-        creds = UserAccountRequest(
-            credentials.UsernamePassword(self.state.username, password), character_name
-        )
+        creds = UsernameRequest(self.state.username)
+
+        # Construct appropriate login data
+        login_data = LoginRequestData(character_name, False, password, self.state.pubkeys)
 
         # Await the login function
-        result = await self.portal.login(creds, None, IConchUser)
+        result = await self.portal.login(creds, login_data, IConchUser)
+
+        if result:
+            self.log_info("Account creation complete.")
+        else:
+            self.log_info("Account creation failed, username is taken.")
 
     def send_banner(self, banner):
         """
         Sends a Userauth Banner packet, causing the specified banner text to be
         displayed by the client.
         """
-        self.transport.sendPacket(userauth.MSG_USERAUTH_BANNER,
-                NS(banner+'\n') + NS("en-US"))
+        self.transport.sendPacket(UserAuthMsg.Banner, NS(banner+'\n') + NS("en-US"))
 
     def send_authFail(self, partial=False):
         """
@@ -452,8 +523,10 @@ class UserAuthService(service.SSHService, Loggable):
         further credentials (such as a second factor) are still required to complete
         authentication. If omitted, this parameter defaults to False.
         """
-        self.transport.sendPacket(userauth.MSG_USERAUTH_FAILURE,
-                NS(','.join(self.supportedAuthentications)) + (b'\xff' if partial else b'\0'))
+        self.transport.sendPacket(
+            UserAuthMsg.Failure,
+            NS(','.join(self.supportedAuthentications)) + (b'\xff' if partial else b'\0')
+        )
 
     def disconnect_no_auth_left(self, msg):
         """
@@ -462,9 +535,7 @@ class UserAuthService(service.SSHService, Loggable):
         The parameter is a string to send as the disconnection message.
         """
         self.log_info("Disconnecting {0}: No more authentication methods left".format(self.ip))
-        self.transport.sendDisconnect(
-            transport.DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE,
-            msg)
+        self.transport.sendDisconnect(Disconnect.NoMoreAuthMethodsAvailable, msg)
 
     def disconnect_host_not_allowed(self, msg):
         """
@@ -473,9 +544,7 @@ class UserAuthService(service.SSHService, Loggable):
         The parameter is a string to send as the disconnection message.
         """
         self.log_info("Disconnecting {0}: Host Not Allowed".format(self.ip))
-        self.transport.sendDisconnect(
-            transport.DISCONNECT_HOST_NOT_ALLOWED_TO_CONNECT,
-            msg)
+        self.transport.sendDisconnect(Disconnect.HostNotAllowedToConnect, msg)
 
     def disconnect_auth_cancelled(self, msg):
         """
@@ -483,9 +552,7 @@ class UserAuthService(service.SSHService, Loggable):
 
         :param msg: A string to send as the disconnection message.
         """
-        self.transport.sendDisconnect(
-            transport.DISCONNECT_AUTH_CANCELLED_BY_USER,
-            msg)
+        self.transport.sendDisconnect(Disconnect.AuthCancelledByUser, msg)
 
     def succeed_auth(self):
         """
@@ -495,7 +562,7 @@ class UserAuthService(service.SSHService, Loggable):
         # Authentication has succeeded fully.
         # Obtain the service desired by the end user
         service = self.transport.factory.getService(self.transport, self.state.desired_service)
-        self.transport.sendPacket(userauth.MSG_USERAUTH_SUCCESS, b'')
+        self.transport.sendPacket(UserAuthMsg.Success, b'')
         self.transport.setService(service())
 
     # noinspection PyPep8Naming
@@ -569,8 +636,8 @@ class KeyboardInteractiveStateMachine(object):
         )
 
         while len(choice) != 1 and choice.lower() not in "rgq":
-            self.auth.doGuestLogin(username)
-            return
+            # self.auth.doGuestLogin(username)
+            # return
             choice, = await self.ask(
                 "Sorry, I don't understand your input.\nRegister, visit as a guest, or quit? (r/g/q): ")
 
@@ -580,7 +647,7 @@ class KeyboardInteractiveStateMachine(object):
             return
         elif choice == "g":
             character_name, = await self.ask("Please choose a name for your temporary character: ")
-            self.auth.doGuestLogin(character_name)
+            self.auth.do_guest_login(character_name)
             return
 
         elif choice == "r":
@@ -597,8 +664,8 @@ class KeyboardInteractiveStateMachine(object):
                 )
             character_name, = await self.ask("Choose a name for your first character: ")
 
-            #TODO: register
-            self.auth.create_account(password, character_name)
+            # TODO: register
+            await self.auth.create_account(password, character_name)
             self.auth.send_banner("Sadly, character creation isn't implemented yet.\n"
                                   f"Character {character_name} was not created.")
             self.auth.disconnect_auth_cancelled("Please visit again soon!")
@@ -633,7 +700,15 @@ class KeyboardInteractiveStateMachine(object):
 
         if self.auth.character is None:
             characters = self.auth.transport.avatar.character_names
-            character_name, = await self.ask(f"Your characters: {','.join(characters)}\nWhat character do you want to use? ")
+            if not characters:  # user has no characters for some reason
+                character_name, = await self.ask(
+                    "You have no characters.\nPlease choose a name for your first character: "
+                )
+                self.auth.transport.avatar.create_character(character_name)
+
+            character_name, = await self.ask(
+                f"Your characters: {','.join(characters)}\nWhat character do you want to use? "
+            )
             while not self.auth.transport.avatar.select_character(character_name):
                 character_name, = await self.ask("Character not found, try again: ")
 

@@ -26,7 +26,7 @@ class Cursor(object):
         """
         self.conn = db.conn
 
-    def __enter__(self):
+    def __enter__(self) -> sqlite3.Cursor:
         """
         Obtain a cursor, save and return it.
         """
@@ -51,7 +51,7 @@ class Sqlite(object):
         if sqlite_version < version.parse("3.24.0"):
             log.warn("Sqlite backend needs a newer version of Sqlite.")
             log.warn("You have: Sqlite {0}".format(sqlite3.sqlite_version))
-            log.warn("You need: Sqlite 3.6.19 or later")
+            log.warn("You need: Sqlite 3.24.0 or later")
             log.warn("Continuing anyway, but foreign key constraints will not work.")
 
         log.info("Opening sqlite database connection.")
@@ -117,13 +117,19 @@ class Sqlite(object):
             now = time.time()
             new_character_room = 0
             try:
-                c.execute("INSERT INTO objects VALUES (NULL, ?, 1, 0, ?, 1, NULL, 0, ?, ?, ?) ON CONFLICT ABORT",
+                c.execute("BEGIN TRANSACTION")
+                c.execute("INSERT OR ROLLBACK INTO objects VALUES (NULL, ?, 1, 0, ?, 1, NULL, 0, ?, ?, ?)",
                           (charname, new_character_room, now, now, now)
                           )
+                log.trace("Created object in database.")
                 obj_id = c.lastrowid
-                c.execute("UPDATE objects SET owner=? WHERE id=?", (obj_id, obj_id))
-                c.execute("INSERT INTO characters VALUES (?, ?)", (username, charname))
-            except sqlite3.IntegrityError:
+                c.execute("UPDATE OR ROLLBACK objects SET owner=? WHERE id=?", (obj_id, obj_id))
+                log.trace("Updated object owner to self.")
+                c.execute("INSERT OR ROLLBACK INTO characters VALUES (?, ?)", (username, obj_id))
+                c.execute("COMMIT")
+                log.trace(f"Successful: INSERT INTO characters VALUES ({username!r}, {charname!r});")
+            except sqlite3.IntegrityError as e:
+                log.trace(f"Integrity error: {e}. Rolled back transaction.")
                 return None
 
     def get_player_id(self, username, charname):

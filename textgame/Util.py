@@ -80,6 +80,9 @@ def log(lvl, message):
 class Loggable:
     """
     Inherit from this class to provide useful logging.
+
+    To use your own logger, you should set the "logger" attribute.
+    If you have a module-level logger (recommended), use "logger = logger".
     """
 
     # Default to root logger

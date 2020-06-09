@@ -232,7 +232,12 @@ class User(object):
             self.send_message(commands[keyword].helptext)
         else:
             self.send_message('There is no help available for "{0}".'.format(keyword))
-        
+
+    def create_character(self, charname):
+        """
+        Creates a new character for this User.
+        """
+        return self.world.db.create_character(self.username, charname)
 
     def complete_login(self):
         """

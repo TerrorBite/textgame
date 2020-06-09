@@ -221,7 +221,7 @@ def create_ssh_factory(world):
         portal = Portal(SSHRealm(world), [
 
             # This checker allows the Portal to verify passwords and create new users.
-            Credentials.CredentialsChecker(world),
+            Credentials.DBCredentialsChecker(world),
 
             # This checker allows the Portal to verify SSH keys.
             SSHPublicKeyChecker(Credentials.AuthorizedKeystore(world.db)),

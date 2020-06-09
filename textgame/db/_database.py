@@ -126,7 +126,6 @@ def create_hash(password: str) -> Tuple[bytes, int]:
 
 class Database(object):
     """
-    This class implements the
     Provides a high-level, logical interface to the textgame database.
 
     Requires a database backend class to operate.
@@ -195,6 +194,18 @@ class Database(object):
     def create_account(self, username, password, charname):
         self._backend.set_password(username, *create_hash(password))
         self._backend.create_character(username, charname)
+
+    @require_connection
+    def create_character(self, username, charname):
+        """
+        Given a username and character name, creates the character if it does not exist.
+
+        :param username: The username
+        :param charname: The character name
+        :return: True if the character was created, False if it exists already.
+        """
+        logger.trace(f"Creating character {charname!r} for user {username!r}")
+        return self._backend.create_character(username, charname) is not None
 
     @require_connection
     def get_player_id(self, username, charname):

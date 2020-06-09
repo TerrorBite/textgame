@@ -19,20 +19,20 @@ class IUserProtocol(Interface):
 
 
 # noinspection PyMethodParameters
-class IUserAccountRequest(ICredentials):
+class IUsernameRequest(ICredentials):
     """
-    I am a request to register an account with a username and password.
+    I am a request for an available username.
     """
 
     username = Attribute("The desired username for the new account.")
-    password = Attribute("The desired password for the new account.")
-    character = Attribute("The desired name for the account's first character.")
 
     def create_account(database):
         """
         Creates the account.
 
         :param database: Some form of database in which this account should be created.
+            The database should implement IDatabaseBackend.
         :return: True if successful, False if not successful, or a Deferred which will
             resolve to one of these values.
         """
+

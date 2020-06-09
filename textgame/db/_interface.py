@@ -5,6 +5,8 @@ This module defines IDatabaseBackend
 """
 
 # Third party library imports
+from typing import Optional
+
 from zope.interface import Interface
 
 
@@ -46,9 +48,12 @@ class IDatabaseBackend(Interface):
         If the username does not exist, it should be created.
         """
 
-    def create_character(username: str, character: str):
+    def create_character(username: str, character: str) -> Optional[int]:
         """
-        This method should create a character in the Characters table for the given username.
+        This method should create a character in the Characters table for the given username, and then return
+        the database ID of the newly created character.
+
+        If the character already exists for this username, this method should do nothing and return None.
         """
 
     def get_user_characters(username):
@@ -91,6 +96,6 @@ def find_backends():
 
     It will return a list of those classes.
     """
-    #First, load the backends
+    # TODO: First, load the backends
 
 

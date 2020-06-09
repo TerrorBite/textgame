@@ -4,3 +4,6 @@ cryptography
 bcrypt
 pyasn1
 packaging
+
+# For development only:
+pytest
