@@ -11,12 +11,13 @@ from twisted.conch import avatar
 from twisted.conch.interfaces import ISession
 from twisted.conch.ssh import session
 
-from textgame.Util import log, LogLevel
+from textgame.Util import get_logger
 from textgame import Things
 from textgame.Terminal import TermTransport
 
 ADMINISTRATIVELY_PROHIBITED = 1
 
+logger = get_logger(__name__)
 
 class State(Enum):
     New = 0
@@ -197,7 +198,8 @@ class User(object):
         This command allows a user to log in as a particular character.
         This can be used when not logged in, but requires a password to do so.
         """
-        log(LogLevel.Debug, "Received connect command from {0}".format(self.transport.getHost().host))
+        logger.debug("Received connect command from %s", self.transport.getHost().host)
+        #log(LogLevel.Debug, "Received connect command from {0}".format(self.transport.getHost().host))
         if self.my_state > State.New.value:
             #Already connected
             self.send_message("You are already connected.")
@@ -242,7 +244,7 @@ class User(object):
         be initialized.
         """
         self.my_state = State.Logged_In
-        log(LogLevel.Notice, "{0}#{1} connected from {2}".format(self.player.name, self.player.id, '<unknown>'))
+        logger.info("%s#%s has awoken", self.player.name, self.player.id)
         self.send_message("To disconnect, type @quit")
         # Make them look around and check their inventory
         location = self.player.parent # Get room that the player is in
@@ -295,19 +297,19 @@ class User(object):
             # Start the search at the player
             thing = self.player
             while True:
-                log(LogLevel.Trace, "Searching {0} for {1}".format(thing.name, words[0]))
+                logger.trace("Searching %s for %s", thing.name, words[0])
                 # Retrieve a list of Actions contained by this thing, which match the word entered
                 actions = [
                     x for x in thing.contents
                     if x.type is Things.Action and x.name.lower().startswith(words[0].lower())
                 ]
-                log(LogLevel.Trace, "{0} contains {1}, matching: {2}".format(thing, thing.contents, actions))
+                logger.trace("%r contains %r, matching: %r", thing, thing.contents, actions)
 
                 # Process list, and return if actions were found
                 if self.process_action_list(actions):
                     return
 
-                log(LogLevel.Trace, "Searching {0}'s contents for {1}".format(thing.name, words[0]))
+                logger.trace("Searching %s's contents for %s", thing.name, words[0])
 
                 # Retrieve a list of Items contained by this thing, and look for Actions on them.
                 # This is to locate items that are carried by the player, or that are contained in
@@ -322,7 +324,7 @@ class User(object):
                         if action.name.lower().startswith(words[0].lower()):
                             # Then add it to the set
                             actions.add(action)
-                log(LogLevel.Trace, "{0}'s contents contain matching: {1}".format(thing, actions))
+                logger.trace("%r's contents contain matching: %r", thing, actions)
 
                 # Process list, and return if actions were found
                 if self.process_action_list(actions):
@@ -338,6 +340,7 @@ class User(object):
         # Command dispatch map. Built-in commands should be accessed this way.
         if words[0] in commands.keys():
             try:
+                # what on earth is this log line
                 log(LogLevel.Debug, "{0} running command: {1}{2}".format(
                     "{0}#{1}".format(self.player.name, self.player.id) if self.player else self.transport.getHost().host,
                     words[0], "({0})".format(', '.join(params) if (words[0] not in ('connect', '@connect')) else '[redacted]')
@@ -396,7 +399,7 @@ class SSHUser(avatar.ConchUser, User):
         })
 
     def lookupChannel(self, channelType, windowSize, maxPacket, data):
-        log(LogLevel.Debug, f"Channel type is: {channelType}")
+        logger.debug(f"Channel type is: {channelType}")
         return super().lookupChannel(channelType, windowSize, maxPacket, data)
 
     def select_character(self, charname):
@@ -404,10 +407,10 @@ class SSHUser(avatar.ConchUser, User):
         Sets the character name which this SSHUser will access.
         """
         chars = self.character_names
-        log.debug(f"User {self.username} has the following characters: {', '.join(chars)}")
+        logger.debug(f"User {self.username} has the following characters: {', '.join(chars)}")
         if charname.lower() in [c.lower() for c in chars]:
             self._charname = charname
-            log.debug(f"Selected {self._charname} on {self!r}")
+            logger.debug(f"Selected {self._charname} on {self!r}")
             return True
         else:
             # Requested character name not found
@@ -445,9 +448,9 @@ class SSHUser(avatar.ConchUser, User):
         ssh_channel.makeConnection(session.wrapProtocol(self.transport))
 
         # Obtain the Player object from the database
-        log.debug(f"Getting Player for {self!r}")
+        logger.debug(f"Getting Player for {self!r}")
         player_id = self.world.db.get_player_id(self.username, self._charname)
-        log.debug("Username: {0}, character: {2}, id: {1}".format(self.username, player_id, self._charname))
+        logger.debug("Username: {0}, character: {2}, id: {1}".format(self.username, player_id, self._charname))
 
         self.player = self.world.get_thing(player_id)
 
@@ -471,9 +474,9 @@ class SSHUser(avatar.ConchUser, User):
 
         We don't support this, so we close the connection.
         """
-        log.debug(f"\n{repr(proto)}\n{dir(proto)}")
+        logger.debug(f"\n{repr(proto)}\n{dir(proto)}")
         proto.write("Your SSH client requested to execute a command. This is not supported.\n")
-        log.debug(f"Attempt to execute command: {cmd!r}")
+        logger.debug(f"Attempt to execute command: {cmd!r}")
         proto.transport = DummyTransport()
         proto.processEnded()
 
