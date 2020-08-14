@@ -409,7 +409,7 @@ class UserAuthService(SSHService, Loggable):
 
     def ssh_USERAUTH_INFO_RESPONSE(self, packet):
         self.response_packet_count += 1
-        if self.response_packet_count > 20000:
+        if self.response_packet_count > 20:
             self.log_info("Disconnecting user: too many attempts")
             self.disconnect_host_not_allowed("You are doing that too much!")
 
