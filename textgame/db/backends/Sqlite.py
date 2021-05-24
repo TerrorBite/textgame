@@ -186,4 +186,5 @@ class Sqlite(object):
             return tuple(map(lambda x: x[0], c.fetchall()))
 
     def create_user(self, username, password, pubkeys):
-        raise NotImplementedError()
+        # TODO: Implement me!
+        raise NotImplementedError("create_user() is not yet implemented")

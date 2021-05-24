@@ -179,13 +179,15 @@ def ThingProxyFactory(_world):
     return ThingProxy
     # End of ThingProxyFactory
 
+
 class World(object):
     """
     The World class represents the game world. It manages the collection of objects that together comprise the world.
     """
 
     def __init__(self, backend, database):
-        self.db = Database(backend, database)
+        #: The `Database` used by this World.
+        self.db: Database = Database(backend, database)
         self.cache = {}
         self.live_set = set() # The live set tracks ThingProxies that are keeping Things loaded
         self.cache_task = task.LoopingCall(self.purge_cache)

@@ -1,23 +1,19 @@
-from twisted.conch.error import ConchError
-from twisted.conch.insults.insults import ITerminalTransport
-from twisted.internet.interfaces import ITransport
-from twisted.python.failure import Failure
-from zope.interface import implementer
-
+import logging
 from enum import Enum
-
 
 from twisted.conch import avatar
 from twisted.conch.interfaces import ISession
 from twisted.conch.ssh import session
+from zope.interface import implementer
 
-from textgame.Util import get_logger
 from textgame import Things
 from textgame.Terminal import TermTransport
+from textgame.Util import get_logger
 
 ADMINISTRATIVELY_PROHIBITED = 1
 
 logger = get_logger(__name__)
+
 
 class State(Enum):
     New = 0
@@ -26,6 +22,9 @@ class State(Enum):
 
 prelogincmds = []
 commands = {}
+
+
+# noinspection PyPep8Naming
 class commandHandler(object): # Decorator
     """
     Decorator that marks a method as a command handler.
@@ -345,14 +344,21 @@ class User(object):
         # Command dispatch map. Built-in commands should be accessed this way.
         if words[0] in commands.keys():
             try:
-                # what on earth is this log line
-                log(LogLevel.Debug, "{0} running command: {1}{2}".format(
-                    "{0}#{1}".format(self.player.name, self.player.id) if self.player else self.transport.getHost().host,
-                    words[0], "({0})".format(', '.join(params) if (words[0] not in ('connect', '@connect')) else '[redacted]')
-                    if params else ''))
-            except TypeError as e:
-                log(LogLevel.Trace, "words: {0}, params: {1}".format(repr(words), repr(params)))
-                log(LogLevel.Trace, "Exception: {0}".format(repr(e)))
+                if logger.isEnabledFor(logging.DEBUG):
+                    # Prepare some data for logging
+                    who_f = f"{self.player.name}#{self.player.id}" if self.player else self.transport.getHost().host
+                    params_f = f"({', '.join(params)})" if params else ''
+
+                    if words[0] in ('connect', '@connect'):
+                        # Parameter is a password, and must be redacted
+                        params_f = "[password redacted]"
+
+                    logger.debug(f"{who_f} running command: {words[0]}{params_f}")
+
+            except TypeError:
+                logger.trace(f"words: {words!r}, params: {params!r}", exc_info=True)
+
+            # Execute the command
             commands[words[0]](self, params)
             return
 
@@ -377,7 +383,7 @@ class User(object):
             # No actions found
             return False
         
-        return True # Found a match
+        return True  # Found a match
 
 
 @implementer(ISession)

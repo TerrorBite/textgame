@@ -1,3 +1,10 @@
+"""
+This file holds Zope interfaces that are used with Twisted.
+
+There should be no functional code in this file - only interface specifications.
+
+Note: The interface for the database backends is in :mod:`db._interface`.
+"""
 import typing
 from twisted.cred.credentials import ICredentials
 from zope.interface import Interface, Attribute
@@ -22,6 +29,9 @@ class IUserProtocol(Interface):
 class IUsernameRequest(ICredentials):
     """
     I am a request for an available username.
+
+    Implementors _must_ specify the sub-interfaces of ICredentials
+    to which it conforms, using `zope.interface.implementer`.
     """
 
     username = Attribute("The desired username for the new account.")

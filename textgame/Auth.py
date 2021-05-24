@@ -1,8 +1,9 @@
 # Twisted imports
 from collections import Awaitable
 from enum import Enum, IntEnum
-from typing import NamedTuple, List, Optional, Sequence
+from typing import NamedTuple, List, Optional, Sequence, TYPE_CHECKING
 
+import twisted.cred.error
 from twisted.conch import error
 from twisted.conch.ssh.service import SSHService
 from twisted.conch.ssh.userauth import SSHUserAuthServer
@@ -20,6 +21,8 @@ from base64 import b64encode
 from textgame.Util import get_logger, Loggable
 from textgame.User import SSHUser
 from textgame.interfaces import IUsernameRequest
+
+from textgame.World import World
 
 logger = get_logger(__name__)
 
@@ -55,7 +58,7 @@ class UserAuthMsg(NamedTuple):
 @implementer(IUsernameRequest)
 class UsernameRequest(object):
     """
-    Represents a request to create an account.
+    Represents a request to create an account, using a specific username.
 
     :param username: The username which is desired.
     """
@@ -63,9 +66,11 @@ class UsernameRequest(object):
         self.username = username
 
 
-class LoginRequestData(NamedTuple):
+class UsernameRequestData(NamedTuple):
     """
     Class representing data used for creating an account.
+
+    Accompanies a :class:`UsernameRequest`.
     """
 
     #: Specifies whether this is a guest login.
@@ -93,7 +98,7 @@ class SSHRealm:
     """
 
     def __init__(self, world):
-        self.world = world
+        self.world: World = world
 
     def doesAvatarExist(self, avatarId):
         """
@@ -102,7 +107,7 @@ class SSHRealm:
         # Query the database as to whether the username exists.
         return self.world.db.username_exists(avatarId)
 
-    def requestAvatar(self, avatarId, mind: LoginRequestData, *interfaces):
+    def requestAvatar(self, avatarId, mind: UsernameRequestData, *interfaces):
         """
         Requests that this Realm shall provide an "avatarAspect" which implements
         one of some list of interfaces. What this means for us is that we will
@@ -216,7 +221,7 @@ class UserAuthService(SSHService, Loggable):
     #: List of blacklisted usernames.
     bad_usernames = (
         "root",
-        # "admin",
+        "admin",
         "ubnt",
         "support",
         "user",
@@ -299,7 +304,9 @@ class UserAuthService(SSHService, Loggable):
             self.log_info(f"Disconnecting user: blacklisted username {user}")
             self.transport.sendDisconnect(
                 Disconnect.IllegalUserName,
-                f"You can't use that username ({user}) here. Please reconnect using a different one.")
+                f"Blacklisted username\n"
+                f"Your username ({user}) is commonly used by spambots, and cannot be used here.\n"
+                f"Please reconnect using a different, more unique username.")
             # self.transport.factory.banHost(self.ip)
             return
 
@@ -453,7 +460,7 @@ class UserAuthService(SSHService, Loggable):
         #  an avatar with IConchGuestUser or similar.
 
         # Obtain and store the avatar and logout function
-        login_data = LoginRequestData(True, character)
+        login_data = UsernameRequestData(True, character)
         (_, self.transport.avatar, self.transport.logoutFunction) = \
             self.portal.realm.requestAvatar(GUEST_USER, login_data, IConchUser)
 
@@ -475,7 +482,7 @@ class UserAuthService(SSHService, Loggable):
         creds = credentials.UsernamePassword(self.state.username, password)
 
         # Await the login function
-        result = await self.portal.login(creds, LoginRequestData(False), IConchUser)
+        result = await self.portal.login(creds, UsernameRequestData(False), IConchUser)
 
         if result:
             # Auth succeeded
@@ -492,19 +499,33 @@ class UserAuthService(SSHService, Loggable):
             return False
 
     async def create_account(self, password, character_name):
+        """
+        Creates an account for the user who is currently trying to log in. Uses the SSHJ username.
+
+        :param password: The password that the user has selected.
+        :param character_name: The character name that the user has selected.
+        :return: True if ...?
+        """
         # Create a username/password pair
         creds = UsernameRequest(self.state.username)
 
         # Construct appropriate login data
-        login_data = LoginRequestData(character_name, False, password, self.state.pubkeys)
+        login_data = UsernameRequestData(False, character_name, password, self.state.pubkeys)
 
         # Await the login function
-        result = await self.portal.login(creds, login_data, IConchUser)
+        # This is leveraging the Twisted system, the UsernameRequest should be handled and
+        # understood as a request to create a new account.
+        try:
+            result = await self.portal.login(creds, login_data, IConchUser)
+        except (twisted.cred.error.LoginFailed, NotImplementedError) as e:
+            self.log_error(f"Account creation failed: {e!s}")
+            return False
 
         if result:
             self.log_info("Account creation complete.")
         else:
             self.log_info("Account creation failed, username is taken.")
+        return result
 
     def send_banner(self, banner):
         """
@@ -664,11 +685,15 @@ class KeyboardInteractiveStateMachine(object):
                 )
             character_name, = await self.ask("Choose a name for your first character: ")
 
-            # TODO: register
-            await self.auth.create_account(password, character_name)
-            self.auth.send_banner("Sadly, character creation isn't implemented yet.\n"
-                                  f"Character {character_name} was not created.")
-            self.auth.disconnect_auth_cancelled("Please visit again soon!")
+            # TODO: Does this return a value?
+            success = await self.auth.create_account(password, character_name)
+            if not success:
+                self.auth.send_banner("Sadly, character creation failed due to an error.\n"
+                                      f"Character {character_name} was not created.")
+                self.auth.disconnect_auth_cancelled("Please visit again soon!")
+            else:
+                # TODO: Log the user in to their new account.
+                self.auth.disconnect_auth_cancelled("TODO: log back in to access your new account.")
 
     async def _existing(self, username):
         """

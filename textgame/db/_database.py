@@ -3,7 +3,7 @@ Internal module of textgame.db
 
 This file provides the Database class and the DBType enum.
 """
-from typing import Tuple
+from typing import Tuple, Sequence, Optional, Type
 
 __all__ = ["Database", "DBType"]
 
@@ -148,7 +148,9 @@ class Database(object):
             raise Exception("Requested backend is not available") from e
         if not IDatabaseBackend.implementedBy(backend_cls):
             raise RuntimeError("The named backend class does not implement IDatabaseBackend.")
-        self._backend = backend_cls(conn_string)
+        # NB: we lie to the type checker about the exact type of _backend to get working completion.
+        self._backend: Type[IDatabaseBackend] = backend_cls(conn_string)
+        # Double-check that the backend implements the expected interface
         verify.verifyObject(IDatabaseBackend, self._backend)
         self.active = True
 
@@ -278,3 +280,17 @@ class Database(object):
 
     def get_contents(self, obj):
         return self._backend.get_contents(obj)
+
+    def create_user(self, username: str, password: str, pubkeys: Sequence[str], character: Optional[str]=None):
+        """
+        Creates a new user in the database, and also creates an initial character for the user.
+
+        :param username: The username for the new user account.
+        :param password: The password for the new user account.
+        :param pubkeys: A sequence of public key strings which can be used in future to authenticate this user.
+        :param character: A character name for this user's first character. If None, no character will be created.
+        """
+        self._backend.create_user(username, password, pubkeys)
+        if character:
+            self._backend.create_character(username, character)
+

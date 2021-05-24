@@ -53,13 +53,18 @@ class DBCredentialsChecker(object):
     def requestAvatarId(self, creds):
 
         if IUsernameRequest.providedBy(creds):
-            logger.trace("Asked to check if {0} is available".format(creds.username))
-            if self.db.username_exists(creds.username):
+            # The credentials are a request to create a new account.
+            # We need to make sure the username is available to be registered.
+            logger.trace("Handling IUsernameRequest: Checking if {0} is available".format(creds.username))
+            if not self.db.username_exists(creds.username):
+                # No such username exists, success!
                 return defer.succeed(creds.username)
             else:
-                return defer.fail(cred_error.LoginFailed("Username does not exist"))
+                # The username already exists, so we can't create the account.
+                return defer.fail(cred_error.LoginFailed("Username already exists"))
 
         else:
+            # The credentials are for an existing account.
             logger.trace("Asked to check credentials for {0}".format(creds.username))
             try:
                 user = creds.username

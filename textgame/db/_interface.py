@@ -5,7 +5,7 @@ This module defines IDatabaseBackend
 """
 
 # Third party library imports
-from typing import Optional
+from typing import Optional, Sequence
 
 from zope.interface import Interface
 
@@ -86,6 +86,11 @@ class IDatabaseBackend(Interface):
         This method should load an object out of the database, returning the row loaded,
         with the fields in the following order:
         type, name, flags, parent, owner, link, money, created, modified, lastused
+        """
+
+    def create_user(username: str, password: str, pubkeys: Sequence[str]):
+        """
+        This method should create a new user in the database. TODO: finish this docstring
         """
 
 

@@ -2,17 +2,18 @@ import socket
 import struct
 from typing import List, Tuple, Dict
 
+import twisted.conch.ssh.transport
 from zope.interface import implementer
 
 from twisted.internet import protocol
 from twisted.conch.checkers import SSHPublicKeyChecker
-from twisted.conch.ssh import factory as conch_factory
+from twisted.conch.ssh import factory as conch_factory, common
 from twisted.conch.ssh import connection, keys
 from twisted.conch.ssh.address import SSHTransportAddress
 
 from textgame.Util import get_logger
 
-from textgame.User import State
+from textgame.User import State, SSHUser
 from textgame.interfaces import IUserProtocol
 from textgame.Auth import SSHRealm, UserAuthService
 
@@ -34,6 +35,8 @@ def int2ip(n: int) -> str:
 class BareUserProtocol(protocol.Protocol):
     """
     Processes a basic user session - a raw connection with no UI presented to the user.
+
+    This is not currently used.
     """
 
     # TODO: This code needs to be completely rewritten.
@@ -54,9 +57,9 @@ class BareUserProtocol(protocol.Protocol):
             self.transport.write(data)
             if data == '\r':
                 self.transport.write('\n')
-            data = data.translate('\r', '\n')
+            data = data.translate(b'\r', b'\n')
             # Split to completed lines
-            lines: List[str] = list(filter(len, data.split('\n')))  # eliminate empty lines
+            lines: List[str] = list(filter(len, data.split(b'\n')))  # eliminate empty lines
             lines[0] = self.buf+lines[0]
             self.buf = lines[-1]
             for line in lines[:-1]:
@@ -74,6 +77,8 @@ class BasicUserSession(protocol.Protocol):
         self.player = None
         self.buf = ''
         self.avatar = avatar
+        self.sshmode = False
+        self.host = None
 
     def connectionMade(self):
         h = self.transport.getHost()
@@ -86,24 +91,38 @@ class BasicUserSession(protocol.Protocol):
             self.player = self.world.connect(self.avatar.username)
             self.complete_login()
 
-
-    def connectionLost(self, data):
+    def connectionLost(self, reason=protocol.connectionDone):
         if self.my_state < State.LoggedIn:
-            pass
-            log(LogLevel.Info, "{0} lost connection: {1}".format(self.host, data.getErrorMessage()))
+            logger.info(f"{self.host} lost connection: {reason.getErrorMessage()}")
         else:
-            try: 
-                log(LogLevel.Info, "{0}#{1} [{2}] lost connection: {3}".format(self.player.name, self.player.id, self.host, data.getErrorMessage()))
-            except:
-                log(LogLevel.Info, "<UNKNOWN> {0} lost connection: {1}".format(self.host, data.getErrorMessage()))
+            if self.player:
+                logger.info(f"{self.player.name}#{self.player.id} [{self.host}] "
+                            f"lost connection: {reason.getErrorMessage()}")
+            else:
+                logger.info(f"{self.host} lost connection: {reason.getErrorMessage()}")
 
 
 class SSHShellOnlyConnection(connection.SSHConnection):
     """
-    TODO: Document this
+    This SSHConnection rejects "session" channel requests of type "exec",
+    while allowing channel requests of type "shell".
     """
-    def getChannel(self, channelType, windowSize, maxPacket, data):
-        channel = self.transport.avatar.lookupChannel(channelType, windowSize, maxPacket, data)
+
+    def ssh_CHANNEL_REQUEST(self, packet):
+        local_channel = struct.unpack(">L", packet[:4])[0]
+        request_type, rest = common.getNS(packet[4:])
+        # want_reply = "" if ord(rest[0:1]) else " (noreply)"
+        # logger.debug(f"CHANNEL_REQUEST: Channel {local_channel} request{want_reply}: {request_type}; "
+        #              f"args: {rest[1:]!r}")
+
+        if request_type == b"exec":
+            # send a MSG_CHANNEL_REQUEST_FAILURE
+            logger.info("Rejecting an attempt to execute a command.")
+            self._ebChannelRequest(None, local_channel)
+            # self.transport.sendDisconnect(twisted.conch.ssh.transport.DISCONNECT_SERVICE_NOT_AVAILABLE,
+            #                               "Command execution is not supported on this server.")
+            return 0
+        return super().ssh_CHANNEL_REQUEST(packet)
 
 
 def get_rsa_server_keys() -> Tuple[keys.Key, keys.Key]:
@@ -119,8 +138,12 @@ def get_rsa_server_keys() -> Tuple[keys.Key, keys.Key]:
     except (FileNotFoundError, keys.BadKeyError):
         # Keys need to be generated.
         private_key, public_key = generate_rsa_server_keys()
+        logger.info("New server keys were generated.")
 
-        return keys.Key.fromString(private_key), keys.Key.fromString(public_key)
+        return (
+            keys.Key.fromString(private_key, type="PRIVATE_OPENSSH"),
+            keys.Key.fromString(public_key)
+        )
 
 
 def generate_rsa_server_keys() -> Tuple[bytes, bytes]:
@@ -145,7 +168,7 @@ def generate_rsa_server_keys() -> Tuple[bytes, bytes]:
     # Get the private key in the standard PEM/PKCS8 format for SSH private keys.
     private_key = key.private_bytes(
         crypto_serialization.Encoding.PEM,
-        crypto_serialization.PrivateFormat.PKCS8,
+        crypto_serialization.PrivateFormat.OpenSSH,
         crypto_serialization.NoEncryption())
 
     # Get the public key in the standard OpenSSH format.
@@ -211,7 +234,8 @@ def create_ssh_factory(world):
 
         services = {
             b'ssh-userauth': UserAuthService,
-            b'ssh-connection': connection.SSHConnection
+            # b'ssh-connection': connection.SSHConnection
+            b'ssh-connection': SSHShellOnlyConnection
         }
 
         # This Portal is the conduit through which we authenticate users.
@@ -220,6 +244,7 @@ def create_ssh_factory(world):
         # which are presented by the user.
         portal = Portal(SSHRealm(world), [
 
+            # TODO: A checker which can create accounts.
             # This checker allows the Portal to verify passwords and create new users.
             Credentials.DBCredentialsChecker(world),
 
@@ -239,7 +264,7 @@ def create_ssh_factory(world):
 
         @property
         def bannerText(self):
-            # We should really be getting this motd from the world instance
+            # TODO: We should really be getting this motd from the world instance
             return "HERE BE DRAGONS!\nThis software is highly experimental." + \
                    "Try not to break it.\nDebug logging is enabled. DO NOT enter any real passwords!\n"
 
