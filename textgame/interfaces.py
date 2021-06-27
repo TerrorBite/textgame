@@ -11,7 +11,7 @@ from zope.interface import Interface, Attribute
 
 
 class IUserProtocol(Interface):
-    #TODO: Document this interface.
+    # TODO: Document this interface.
     def write_line(line):
         """
         Sends a complete line of text to the user.

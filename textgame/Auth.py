@@ -371,7 +371,8 @@ class UserAuthService(SSHService, Loggable):
 
     def handle_known_user(self, method, rest):
         if method == "publickey":
-            # TODO: Do public key auth for the user.
+            # TODO: #7: Do public key auth for the user.
+            #       Currently just fails this auth method.
             algo, blob, rest = getNS(rest[1:], 2)
             self.log_trace(self.key2str(algo, blob))
             self.send_authFail()
@@ -383,7 +384,8 @@ class UserAuthService(SSHService, Loggable):
             self.state.begin_interactive()
 
         elif method == "password":
-            # TODO: Do password auth for a known user.
+            # TODO: #8: Do password auth for a known user.
+            #       This will be a fast way to login if the character name is included in the username.
             self.send_authFail()
 
         else:
@@ -393,7 +395,9 @@ class UserAuthService(SSHService, Loggable):
     
     def first_contact(self):
         """
-        Called the first time a user sends us a userauth request.
+        Called the first time a user sends us a userauth request in this auth session.
+
+        We currently only use this to log the user connection.
         """
         known_text = "Known" if self.state.user_is_known else "Unknown"
         self.log_info("{0} user {1} is authenticating".format(known_text, self.state.username))
@@ -455,9 +459,8 @@ class UserAuthService(SSHService, Loggable):
         """
         Log the user in to a guest character.
         """
-        # TODO: This currently logs in to the admin account.
-        #  This needs to log in to a guest character, by requesting
-        #  an avatar with IConchGuestUser or similar.
+        # TODO: #4: This currently logs in to the "Guest" character (hardcoded). This needs to be done better.
+        # Consider requesting an avatar with IConchGuestUser or similar.
 
         # Obtain and store the avatar and logout function
         login_data = UsernameRequestData(True, character)
@@ -685,14 +688,14 @@ class KeyboardInteractiveStateMachine(object):
                 )
             character_name, = await self.ask("Choose a name for your first character: ")
 
-            # TODO: Does this return a value?
+            # TODO: #3: Does this return a value?
             success = await self.auth.create_account(password, character_name)
             if not success:
                 self.auth.send_banner("Sadly, character creation failed due to an error.\n"
                                       f"Character {character_name} was not created.")
                 self.auth.disconnect_auth_cancelled("Please visit again soon!")
             else:
-                # TODO: Log the user in to their new account.
+                # TODO: #3: Log the user in to their new account.
                 self.auth.disconnect_auth_cancelled("TODO: log back in to access your new account.")
 
     async def _existing(self, username):

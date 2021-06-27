@@ -100,7 +100,7 @@ class AuthorizedKeystore(object):
         twisted.conch.ssh.keys.Key) that are associated
         with this username.
         """
-        #TODO: Implement this
+        # TODO: #6: Implement getAuthorizedKeys()
         # The parameter is the value returned by
         # ICredentialsChecker.requestAvatarId().
         logger.debug('AuthorizedKeys( "{0}" )'.format(username))

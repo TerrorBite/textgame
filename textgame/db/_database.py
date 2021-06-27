@@ -225,7 +225,7 @@ class Database(object):
         """
         Given a username, retrieves a list of public keys for the user.
         """
-        #TODO: Implement public key retrieval
+        # TODO: #6: Implement public key retrieval
         return []
 
     @require_connection
@@ -235,7 +235,7 @@ class Database(object):
         The database expects the public key blob to be a raw bytestring; however,
         it will be stored in the database as base64.
         """
-        #TODO: Implement public key storage
+        # TODO: #6: Implement public key storage
         pass
 
     def load_object(self, world, obj):

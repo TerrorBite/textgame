@@ -39,7 +39,7 @@ class BareUserProtocol(protocol.Protocol):
     This is not currently used.
     """
 
-    # TODO: This code needs to be completely rewritten.
+    # TODO: This code needs to be completely rewritten or removed.
 
     def __init__(self, user=None):
         self.user = user
@@ -207,7 +207,7 @@ def create_ssh_factory(world):
     """
 
     # Global ban list shared by all factories.
-    # TODO: persist this
+    # TODO: persist this across restarts somehow
     ban_list = set([])
 
     # Get the keys we will need.

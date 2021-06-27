@@ -197,7 +197,7 @@ class Parser(object):
 
         return re_interscript.sub(repl, string)
 
-    #@depth_meter #TODO: Debug decorator, remove this
+    #@depth_meter # TODO: Interscript: Debug decorator, remove this
     def _parse_func(self, source, pos):
         """
         Parses a function.

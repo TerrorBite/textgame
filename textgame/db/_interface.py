@@ -90,7 +90,7 @@ class IDatabaseBackend(Interface):
 
     def create_user(username: str, password: str, pubkeys: Sequence[str]):
         """
-        This method should create a new user in the database. TODO: finish this docstring
+        This method should create a new user in the database. TODO: #3: finish this docstring
         """
 
 
