@@ -6,7 +6,7 @@ try:
 finally:
     setup_logging(5)
 
-from textgame.Network import BasicUserSession, create_ssh_factory
+from textgame.Network import BasicUserSession, SSHFactory
 from textgame.World import World
 
 log = get_logger("main")
@@ -19,13 +19,13 @@ if __name__ == '__main__':
 
     log.debug("Setting up ServerFactory")
 
-    # Set up server factory for plaintext.
-    factory = protocol.ServerFactory()
-    factory.protocol = BasicUserSession
-    reactor.listenTCP(8888, factory)
+    # Set up server factory for plaintext. Currently disabled as the code is not functional.
+    # factory = protocol.ServerFactory()
+    # factory.protocol = BasicUserSession
+    # reactor.listenTCP(8888, factory)
 
     # Set up server factory for SSH access.
-    reactor.listenTCP(8822, create_ssh_factory(world))
+    reactor.listenTCP(8822, SSHFactory(world))
     log.info('Now listening for connections.')
 
     def on_shutdown():

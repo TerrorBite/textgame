@@ -1,5 +1,7 @@
 import socket
 import struct
+import textwrap
+import warnings
 from typing import List, Tuple, Dict
 
 import twisted.conch.ssh.transport
@@ -10,12 +12,14 @@ from twisted.conch.checkers import SSHPublicKeyChecker
 from twisted.conch.ssh import factory as conch_factory, common
 from twisted.conch.ssh import connection, keys
 from twisted.conch.ssh.address import SSHTransportAddress
+from twisted.cred.portal import Portal
 
 from textgame.Util import get_logger
 
 from textgame.User import State, SSHUser
 from textgame.interfaces import IUserProtocol
 from textgame.Auth import SSHRealm, UserAuthService
+from textgame.db import Credentials
 
 logger = get_logger(__name__)
 
@@ -42,6 +46,8 @@ class BareUserProtocol(protocol.Protocol):
     # TODO: This code needs to be completely rewritten or removed.
 
     def __init__(self, user=None):
+        warnings.warn("Not used - needs rewrite.", DeprecationWarning)
+
         self.user = user
         self.buf = ''
         self.sshmode = False
@@ -127,9 +133,9 @@ class SSHShellOnlyConnection(connection.SSHConnection):
 
 def get_rsa_server_keys() -> Tuple[keys.Key, keys.Key]:
     """
-    Gets the SSH private and public keys, generating them if they do not exist.
+    Gets the SSH RSA private and public keys, generating them if they do not exist.
 
-    :return: The private and public keys.
+    :return: A tuple of (private key, public key).
     """
     try:
         # Load existing keys
@@ -188,61 +194,41 @@ def generate_rsa_server_keys() -> Tuple[bytes, bytes]:
     return private_key, public_key
 
 
-def create_ssh_factory(world):
+# TODO: persist this across restarts somehow
+#: Global ban list shared by all factories.
+global_ban_list = set()
+
+
+# noinspection PyPep8Naming
+class SSHFactory(conch_factory.SSHFactory):
     """
-    Creates and returns a factory class that produces SSH sessions.
+    Factory responsible for generating SSHSessions.
 
-    This function is responsible for loading the SSH host keys that our
-    SSH server will use, or generating them if they do not exist (if possible).
+    This SSHFactory is based upon the built-in Conch SSHFactory, but with extra functionality:
 
-    The reason why we have a double-factory setup is twofold:
-    
-    First, we need to dynamically load (or maybe generate) SSH host keys, and for
-    some reason, Twisted's SSHFactory seems to require the SSH keys to be present
-    as class attributes. The connection and userauth classes to use also need to
-    be set this way.
+    * Loads the RSA host keys from disk when instantiated
+    * Takes a world parameter, allowing multiple worlds to potentially be hosted in one server instance
+    * Configures the Portal to be used, creating the Realm and other checkers
+    * Sets the banner text to be sent on connect
+    * Ability to ban IP addresses from connecting
 
-    Second, this allows us to create a separate SSHFactory per world, should we ever
-    run more than one world on a single server.
+    We also configure the SSHFactory with the services we are providing.
+    In this case we are using our UserAuthService (a subclass of the
+    built-in Conch SSHUserAuthServer) to authenticate users, and the
+    built-in SSHConnection class to handle incoming connections.
+    The built-in classes are configured via the
+    Portal that is stored in the portal attribute.
     """
 
-    # Global ban list shared by all factories.
-    # TODO: persist this across restarts somehow
-    ban_list = set([])
-
-    # Get the keys we will need.
-    private_key, public_key = get_rsa_server_keys()
-
-    from textgame.db import Credentials
-    from twisted.cred.portal import Portal
-
-    # noinspection PyPep8Naming
-    class SSHFactory(conch_factory.SSHFactory):
-        """
-        Factory responsible for generating SSHSessions.
-
-        This SSHFactory is functionally identical to the built-in Conch
-        SSHFactory, but is pre-configured with our SSH host keys.
-
-        We also configure the SSHFactory with the services we are providing.
-        In this case we are using our UserAuthService (a subclass of the
-        built-in Conch SSHUserAuthServer) to authenticate users, and the
-        built-in SSHConnection class to handle incoming connections.
-        The built-in classes are configured via the
-        Portal that is stored in the portal attribute.
-        """
-
-        services = {
-            b'ssh-userauth': UserAuthService,
-            # b'ssh-connection': connection.SSHConnection
-            b'ssh-connection': SSHShellOnlyConnection
-        }
+    def __init__(self, world):
+        self.world = world
+        self._rsa_key, self._rsa_pub = get_rsa_server_keys()
 
         # This Portal is the conduit through which we authenticate users.
         # The SSHRealm will generate user instances after auth succeeds.
         # We pass a list of instances to the SSHRealm; the realm will use these to verify credentials
         # which are presented by the user.
-        portal = Portal(SSHRealm(world), [
+        self.portal = Portal(SSHRealm(world), [
 
             # TODO: A checker which can create accounts.
             # This checker allows the Portal to verify passwords and create new users.
@@ -252,48 +238,88 @@ def create_ssh_factory(world):
             SSHPublicKeyChecker(Credentials.AuthorizedKeystore(world.db)),
         ])
 
-        def getPublicKeys(self) -> Dict[bytes, keys.Key]:
-            return {
-                b'ssh-rsa': public_key
-            }
+    services = {
+        b'ssh-userauth': UserAuthService,
+        # b'ssh-connection': connection.SSHConnection
+        b'ssh-connection': SSHShellOnlyConnection
+    }
 
-        def getPrivateKeys(self) -> Dict[bytes, keys.Key]:
-            return {
-                b'ssh-rsa': private_key
-            }
+    def getPublicKeys(self) -> Dict[bytes, keys.Key]:
+        return {
+            b'ssh-rsa': self._rsa_pub
+        }
 
-        @property
-        def bannerText(self):
-            # TODO: We should really be getting this motd from the world instance
-            return "HERE BE DRAGONS!\nThis software is highly experimental." + \
-                   "Try not to break it.\nDebug logging is enabled. DO NOT enter any real passwords!\n"
+    def getPrivateKeys(self) -> Dict[bytes, keys.Key]:
+        return {
+            b'ssh-rsa': self._rsa_key
+        }
 
-        def buildProtocol(self, address):
-            """
-            Build an SSHServerTransport for this connection.
+    primes_path = '/etc/ssh/moduli'
 
-            :param address: A :class:`twisted.internet.interfaces.IAddress` provider, representing the IP address
-                of the client connecting to us.
-            :return: A :class:`SSHServerTransport` instance, or None if the connection should be rejected..
-            """
-            # Reject this connection if the IP is banned.
-            if ip2int(address.host) in ban_list:
-                logger.verbose("Rejecting connection from banned IP {0}".format(address.host))
-                # This will send a RST packet
-                return None
-            # otherwise all good; let superclass do the rest
-            logger.verbose("Incoming SSH connection from {0}".format(address.host))
-            return conch_factory.SSHFactory.buildProtocol(self, address)
+    def getPrimes(self):
+        """
+        Return dictionary with primes number.
+        Reads prime numbers from OpenSSH compatible moduli file.
+        """
+        primes_file = open(self.primes_path, 'r')
+        try:
+            primes = {}
+            for line in primes_file:
+                line = line.strip()
+                if not line or line[0] == '#':
+                    continue
+                tim, typ, tst, tri, size, gen, mod = line.split()
+                size = int(size) + 1
+                gen = int(gen)
+                mod = int(mod, 16)
+                if size not in primes:
+                    primes[size] = []
+                primes[size].append((gen, mod))
+            return primes
+        finally:
+            primes_file.close()
 
-        @staticmethod
-        def ban_host(host, duration=None):
-            """
-            Bans a host from connecting.
-            """
-            # TODO: Timed bans?
-            logger.verbose("Banning IP {0}".format(host))
-            ban_list.add(ip2int(host))
+    @property
+    def bannerText(self):
+        # TODO: We should really be getting this motd from the world instance
+        return textwrap.dedent("""\
+            HERE BE DRAGONS!
+            This software is highly experimental. Try not to break it.
+            Debug logging is enabled. DO NOT enter any real passwords - all input is logged!
+            """)
 
-    return SSHFactory()
-    # End of SSH host key loading code
+    def buildProtocol(self, address):
+        """
+        Build an SSHServerTransport for this connection.
+
+        :param address: A :class:`twisted.internet.interfaces.IAddress` provider, representing the IP address
+            of the client connecting to us.
+        :return: A :class:`SSHServerTransport` instance, or None if the connection should be rejected.
+        """
+        # Reject this connection if the IP is banned.
+        if ip2int(address.host) in global_ban_list:
+            logger.verbose("Rejecting connection from banned IP {0}".format(address.host))
+            # This will send a RST packet
+            return None
+        # otherwise all good
+        logger.verbose("Incoming SSH connection from {0}".format(address.host))
+
+        # Let our superclass do the rest
+        transport = conch_factory.SSHFactory.buildProtocol(self, address)
+
+        # Fix for Twisted bug? supportedPublicKeys is a dict_keys object,
+        # but Twisted tries to use it as a sequence. Convert it to a list.
+        transport.supportedPublicKeys = list(transport.supportedPublicKeys)
+
+        return transport
+
+    @staticmethod
+    def ban_host(host, duration=None):
+        """
+        Bans a host from connecting.
+        """
+        # TODO: Timed bans?
+        logger.verbose("Banning IP {0}".format(host))
+        global_ban_list.add(ip2int(host))
+
 

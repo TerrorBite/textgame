@@ -220,12 +220,10 @@ class UserAuthService(SSHService, Loggable):
 
     #: List of blacklisted usernames.
     bad_usernames = (
-        "root",
-        "admin",
-        "ubnt",
-        "support",
-        "user",
-        "pi"
+        "root", "admin", "administrator",
+        "MikroTik", "ubnt", "oracle",
+        "support", "web", "tech",
+        "user", "pi"
     )
 
     def _format_log(self, msg):
