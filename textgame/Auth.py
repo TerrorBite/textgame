@@ -4,6 +4,7 @@ from enum import Enum, IntEnum
 from typing import NamedTuple, List, Optional, Sequence, TYPE_CHECKING
 
 import twisted.cred.error
+import typing
 from twisted.conch import error
 from twisted.conch.ssh.service import SSHService
 from twisted.conch.ssh.userauth import SSHUserAuthServer
@@ -223,7 +224,7 @@ class UserAuthService(SSHService, Loggable):
         "root", "admin", "administrator",
         "MikroTik", "ubnt", "oracle",
         "support", "web", "tech",
-        "user", "pi"
+        "user", "pi", "sa"
     )
 
     def _format_log(self, msg):
@@ -297,16 +298,9 @@ class UserAuthService(SSHService, Loggable):
         user = user.decode('utf-8')
         method = method.decode('ascii')
 
-        # First, check if the username is allowed.
-        if user.lower() in self.bad_usernames:
-            self.log_info(f"Disconnecting user: blacklisted username {user}")
-            self.transport.sendDisconnect(
-                Disconnect.IllegalUserName,
-                f"Blacklisted username\n"
-                f"Your username ({user}) is commonly used by spambots, and cannot be used here.\n"
-                f"Please reconnect using a different, more unique username.")
-            # self.transport.factory.banHost(self.ip)
-            return
+        if user == "banme":  # Debug testing
+            self.transport.factory.ban_host(self.ip)
+            self.disconnect_host_not_allowed("You are banned from this server.")
 
         # Next, check if there's a character name in the username.
         if ':' in user:
@@ -351,17 +345,31 @@ class UserAuthService(SSHService, Loggable):
             # Store their pubkeys so they can use one to register with us.
             self.log_debug("Pubkey attempt")
             self.store_pubkey(rest)
+
         elif method == "keyboard-interactive":
             self.log_debug("Interactive attempt")
-            # Start up the keyboard-interactive state machine.
-            # This will take care of asking questions.
+
+            # Check if the username is allowed. We could do this earlier, but we want to give the time for much
+            # more reliable methods of bot-detection to have an opportunity before relying on this one.
+            if self.state.username.lower() in self.bad_usernames:
+                self.log_info(f"Disconnecting user: blacklisted username {self.state.username}")
+                self.transport.sendDisconnect(
+                    Disconnect.IllegalUserName,
+                    f"Blacklisted username\n"
+                    f"Your username ({self.state.username}) is commonly used by spambots, and cannot be used here.\n"
+                    f"Please reconnect using a different, more unique username.")
+                # self.transport.factory.banHost(self.ip)
+                return
+
+            # Start up the keyboard-interactive state machine. This will take care of asking questions.
             self.state.begin_interactive()
+
         elif method == "password":
-            # We told this client we don't support passwords
-            # but they are ignoring us. Probably a bot.
+            # We told this client we don't support passwords, but they are ignoring us. Probably a bot.
             self.log_info("Disconnecting user: illegal password attempt")
             self.disconnect_host_not_allowed("This auth method is not allowed")
             self.transport.factory.ban_host(self.ip)
+
         else:
             # No idea what this is, but we don't support it.
             self.log_debug("Unknown {0} attempt".format(method))
@@ -394,6 +402,8 @@ class UserAuthService(SSHService, Loggable):
     def first_contact(self):
         """
         Called the first time a user sends us a userauth request in this auth session.
+
+        Note: If the username changes, then this will be called again as though the connection was fresh.
 
         We currently only use this to log the user connection.
         """
@@ -439,8 +449,12 @@ class UserAuthService(SSHService, Loggable):
         self.log_trace("Answers:"+', '.join(repr(r) for r in resp))
         self.state.continue_interactive([r.decode('utf-8') for r in resp])
     
-    def ask_questions(self, questions):
-        questions = list(questions)
+    def ask_questions(self, questions: typing.List[typing.Tuple[str, bool]], delay: float = 0.0):
+        """
+        Ask questions to the user.
+
+        If delay is set to a nonzero value, then the packet won't be sent immediately.
+        """
         resp = []
         for message, isPassword in questions:
             resp.append((message, b'\0' if isPassword else b'\x01'))
@@ -449,9 +463,18 @@ class UserAuthService(SSHService, Loggable):
         packet += struct.pack('>L', len(resp))
         for prompt, echo in resp:
             packet += NS(prompt) + echo
-        self.transport.sendPacket(UserAuthMsg.InfoRequest, packet)
-        self.log_debug("Asked the user a question")
-        self.log_trace("Asked:\n"+'\n'.join(repr(q) for q in questions))
+
+        def _ask_questions():
+            self.transport.sendPacket(UserAuthMsg.InfoRequest, packet)
+            self.log_trace("Asked:\n"+'\n'.join(repr(q) for q in questions))
+        if delay > 0:
+            self.log_debug("Asking the user a question (delayed)")
+            from twisted.internet import reactor, base
+            reactor = typing.cast(base.ReactorBase, reactor)
+            reactor.callLater(delay, _ask_questions)
+        else:
+            self.log_debug("Asking the user a question")
+            _ask_questions()
 
     def do_guest_login(self, character):
         """
@@ -601,7 +624,7 @@ class UserAuthService(SSHService, Loggable):
         self.transport.logoutFunction = logout
         next_service = self.transport.factory.getService(self.transport, self.state.desired_service)
         if not next_service:
-            raise error.ConchError(f'could not get next service: {self.nextService}')
+            raise error.ConchError(f'could not get next service: {self.state.desired_service}')
         self.log_debug(f'{self.state.username} authenticated for {next_service!r}')
         self.succeed_auth()
 
@@ -616,6 +639,9 @@ class KeyboardInteractiveStateMachine(object):
         # Get the appropriate coroutine.
         # There's one for existing users and one for new users.
         self._state = self._existing(username) if is_known else self._new_user(username)
+
+        # Tarpit delay for bots that spam the auth with passwords
+        self._delay = 0.0
 
         # Invoke its first run
         self._state.send(None)
@@ -637,13 +663,26 @@ class KeyboardInteractiveStateMachine(object):
             return False
         return True
 
-    def ask(self, *questions):
-        self.auth.ask_questions((q, False) for q in questions)
+    def _ask_questions(self, questions: typing.Iterable[str], is_pass: bool):
+        # Include delay for asking questions
+        self.auth.ask_questions([(q, is_pass) for q in questions], self._delay)
         return self.Response()
 
+    def ask(self, *questions):
+        return self._ask_questions(questions, False)
+
     def ask_pass(self, *questions):
-        self.auth.ask_questions((q, True) for q in questions)
-        return self.Response()
+        return self._ask_questions(questions, True)
+
+    def penalise(self):
+        if self._delay == 0.0:
+            self._delay = 0.5
+        else:
+            # Double the penalty time
+            self._delay *= 2.0
+
+    def reset_penalty(self):
+        self._delay = 0.0
 
     async def _new_user(self, username):
         """
@@ -658,11 +697,12 @@ class KeyboardInteractiveStateMachine(object):
         )
 
         while len(choice) != 1 and choice.lower() not in "rgq":
-            # self.auth.doGuestLogin(username)
-            # return
+            # Unknown input. Begin applying a delay to asking further questions to defend against bots.
             choice, = await self.ask(
                 "Sorry, I don't understand your input.\nRegister, visit as a guest, or quit? (r/g/q): ")
+            self.penalise()
 
+        self.reset_penalty()
         if choice == "q":
             self.auth.send_banner("Goodbye!")
             self.auth.disconnect_auth_cancelled("Please come again soon!")
